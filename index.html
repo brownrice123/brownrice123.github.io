@@ -13,7 +13,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <!-- Load Recharts for charts -->
-    <script src="https://unpkg.com/recharts@2.5.0/dist/Recharts.js"></script>
+    <script src="https://unpkg.com/recharts@2.12.7/dist/Recharts.js" onload="console.log('Recharts loaded:', typeof Recharts)"></script>
     
     <!-- Load Google Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -38,7 +38,18 @@
     <!-- Your React Application -->
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
+        
+        // Check if Recharts loaded, if not provide fallback
+        let BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer;
+        
+        if (typeof Recharts !== 'undefined') {
+          ({ BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts);
+        } else {
+          console.error('Recharts failed to load - charts will not display');
+          // Create dummy components so app still works
+          const DummyChart = () => <div style={{padding: '2rem', background: '#fee', borderRadius: '12px', textAlign: 'center'}}>Chart library not loaded. Please refresh the page.</div>;
+          BarChart = Bar = PieChart = Pie = Cell = LineChart = Line = XAxis = YAxis = CartesianGrid = Tooltip = Legend = ResponsiveContainer = DummyChart;
+        }
 
         // Simple icon components using Unicode symbols
         const Icon = ({ children, size = 20 }) => (
@@ -58,6 +69,7 @@
         const Save = ({ size }) => <Icon size={size}>💾</Icon>;
         const BarChart3 = ({ size }) => <Icon size={size}>📊</Icon>;
         const Download = ({ size }) => <Icon size={size}>⬇️</Icon>;
+        const Settings = ({ size }) => <Icon size={size}>⚙️</Icon>;
 
         const GroceryExpenseTracker = () => {
           const [receipts, setReceipts] = useState([]);
@@ -67,6 +79,8 @@
           const [editingItem, setEditingItem] = useState(null);
           const [dateRange, setDateRange] = useState('all');
           const [sortBy, setSortBy] = useState('date');
+          const [apiKey, setApiKey] = useState('');
+          const [tempApiKey, setTempApiKey] = useState('');
 
           // Category definitions with colors
           const categories = {
@@ -90,9 +104,14 @@
             try {
               const receiptsData = localStorage.getItem('grocery-receipts');
               const itemsData = localStorage.getItem('grocery-items');
+              const savedApiKey = localStorage.getItem('anthropic-api-key');
               
               if (receiptsData) setReceipts(JSON.parse(receiptsData));
               if (itemsData) setItems(JSON.parse(itemsData));
+              if (savedApiKey) {
+                setApiKey(savedApiKey);
+                setTempApiKey(savedApiKey);
+              }
             } catch (error) {
               console.log('No existing data found, starting fresh');
             }
@@ -107,8 +126,35 @@
             }
           };
 
+          const saveApiKey = () => {
+            try {
+              localStorage.setItem('anthropic-api-key', tempApiKey);
+              setApiKey(tempApiKey);
+              alert('API key saved successfully! You can now upload receipts.');
+            } catch (error) {
+              console.error('Failed to save API key:', error);
+              alert('Failed to save API key. Please try again.');
+            }
+          };
+
+          const clearApiKey = () => {
+            if (confirm('Are you sure you want to remove your API key?')) {
+              localStorage.removeItem('anthropic-api-key');
+              setApiKey('');
+              setTempApiKey('');
+              alert('API key removed.');
+            }
+          };
+
           // Process receipt image with Claude
           const processReceiptImage = async (file) => {
+            // Check if API key is set
+            if (!apiKey) {
+              alert('Please set your Anthropic API key in Settings first!');
+              setView('settings');
+              return;
+            }
+
             setIsProcessing(true);
             
             try {
@@ -123,6 +169,8 @@
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
+                  "x-api-key": apiKey,
+                  "anthropic-version": "2023-06-01"
                 },
                 body: JSON.stringify({
                   model: "claude-sonnet-4-20250514",
@@ -159,6 +207,11 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                 })
               });
 
+              if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error?.message || 'API request failed');
+              }
+
               const data = await response.json();
               const text = data.content.map(item => item.text || "").join("\n");
               const cleanText = text.replace(/\`\`\`json|\`\`\`/g, "").trim();
@@ -191,7 +244,7 @@ Categorize each item appropriately. If you can't read something clearly, make yo
               setView('items');
             } catch (error) {
               console.error('Error processing receipt:', error);
-              alert('Failed to process receipt. Please try again.');
+              alert(`Failed to process receipt: ${error.message}\n\nPlease check your API key and try again.`);
               setIsProcessing(false);
             }
           };
@@ -424,7 +477,8 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                   {[
                     { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
                     { id: 'items', icon: ShoppingCart, label: 'Items' },
-                    { id: 'receipts', icon: Camera, label: 'Receipts' }
+                    { id: 'receipts', icon: Camera, label: 'Receipts' },
+                    { id: 'settings', icon: Settings, label: 'Settings' }
                   ].map(tab => (
                     <button
                       key={tab.id}
@@ -1063,6 +1117,270 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                         <p>No receipts uploaded yet. Click "Upload Receipt" to get started!</p>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Settings View */}
+                {view === 'settings' && (
+                  <div style={{
+                    background: 'white',
+                    borderRadius: '20px',
+                    padding: '2rem',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)',
+                    maxWidth: '800px',
+                    margin: '0 auto'
+                  }}>
+                    <h2 style={{
+                      margin: '0 0 1.5rem 0',
+                      fontSize: '1.5rem',
+                      fontWeight: '700',
+                      color: '#334155'
+                    }}>Settings</h2>
+
+                    {/* API Key Section */}
+                    <div style={{
+                      background: '#f8fafc',
+                      borderRadius: '16px',
+                      padding: '2rem',
+                      marginBottom: '2rem'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        marginBottom: '1rem'
+                      }}>
+                        <div style={{
+                          background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                          borderRadius: '10px',
+                          padding: '0.5rem',
+                          display: 'flex',
+                          color: 'white'
+                        }}>
+                          🔑
+                        </div>
+                        <h3 style={{
+                          margin: 0,
+                          fontSize: '1.125rem',
+                          fontWeight: '700',
+                          color: '#334155'
+                        }}>Anthropic API Key</h3>
+                      </div>
+
+                      <p style={{
+                        color: '#64748b',
+                        fontSize: '0.95rem',
+                        marginBottom: '1.5rem',
+                        lineHeight: '1.6'
+                      }}>
+                        To use the receipt upload feature, you need an Anthropic API key. 
+                        Get one from <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" style={{ color: '#667eea', textDecoration: 'none', fontWeight: '600' }}>console.anthropic.com</a>
+                      </p>
+
+                      {apiKey ? (
+                        <div style={{
+                          background: '#d1fae5',
+                          border: '2px solid #10b981',
+                          borderRadius: '12px',
+                          padding: '1rem',
+                          marginBottom: '1rem'
+                        }}>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: '#065f46',
+                            fontWeight: '600',
+                            marginBottom: '0.5rem'
+                          }}>
+                            ✓ API Key Connected
+                          </div>
+                          <div style={{
+                            color: '#047857',
+                            fontSize: '0.875rem',
+                            fontFamily: 'monospace',
+                            wordBreak: 'break-all'
+                          }}>
+                            {apiKey.substring(0, 20)}...{apiKey.substring(apiKey.length - 4)}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{
+                          background: '#fef3c7',
+                          border: '2px solid #f59e0b',
+                          borderRadius: '12px',
+                          padding: '1rem',
+                          marginBottom: '1rem'
+                        }}>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: '#92400e',
+                            fontWeight: '600',
+                            fontSize: '0.95rem'
+                          }}>
+                            ⚠️ No API Key Set
+                          </div>
+                          <div style={{
+                            color: '#78350f',
+                            fontSize: '0.875rem',
+                            marginTop: '0.5rem'
+                          }}>
+                            Receipt upload is disabled until you add your API key below.
+                          </div>
+                        </div>
+                      )}
+
+                      <label style={{
+                        display: 'block',
+                        marginBottom: '0.75rem',
+                        fontWeight: '600',
+                        color: '#334155',
+                        fontSize: '0.95rem'
+                      }}>
+                        API Key
+                      </label>
+                      <input
+                        type="password"
+                        value={tempApiKey}
+                        onChange={(e) => setTempApiKey(e.target.value)}
+                        placeholder="sk-ant-api03-..."
+                        style={{
+                          width: '100%',
+                          padding: '0.875rem',
+                          borderRadius: '12px',
+                          border: '2px solid #e2e8f0',
+                          fontSize: '0.95rem',
+                          fontFamily: 'monospace',
+                          marginBottom: '1rem',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+
+                      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={saveApiKey}
+                          disabled={!tempApiKey}
+                          style={{
+                            background: tempApiKey ? 'linear-gradient(135deg, #667eea, #764ba2)' : '#e2e8f0',
+                            color: tempApiKey ? 'white' : '#94a3b8',
+                            border: 'none',
+                            padding: '0.875rem 1.75rem',
+                            borderRadius: '12px',
+                            cursor: tempApiKey ? 'pointer' : 'not-allowed',
+                            fontWeight: '600',
+                            fontSize: '0.95rem',
+                            boxShadow: tempApiKey ? '0 4px 12px rgba(102, 126, 234, 0.3)' : 'none',
+                            transition: 'all 0.3s ease'
+                          }}
+                        >
+                          💾 Save API Key
+                        </button>
+
+                        {apiKey && (
+                          <button
+                            onClick={clearApiKey}
+                            style={{
+                              background: 'white',
+                              color: '#ef4444',
+                              border: '2px solid #ef4444',
+                              padding: '0.875rem 1.75rem',
+                              borderRadius: '12px',
+                              cursor: 'pointer',
+                              fontWeight: '600',
+                              fontSize: '0.95rem',
+                              transition: 'all 0.3s ease'
+                            }}
+                          >
+                            🗑️ Remove Key
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Info Section */}
+                    <div style={{
+                      background: '#eff6ff',
+                      borderRadius: '16px',
+                      padding: '1.5rem',
+                      border: '1px solid #dbeafe'
+                    }}>
+                      <h4 style={{
+                        margin: '0 0 1rem 0',
+                        fontSize: '1rem',
+                        fontWeight: '700',
+                        color: '#1e40af',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}>
+                        ℹ️ About API Keys
+                      </h4>
+                      <ul style={{
+                        margin: 0,
+                        paddingLeft: '1.25rem',
+                        color: '#1e40af',
+                        fontSize: '0.875rem',
+                        lineHeight: '1.8'
+                      }}>
+                        <li>Your API key is stored locally in your browser</li>
+                        <li>It's never sent anywhere except to Anthropic's API</li>
+                        <li>Each receipt costs approximately $0.01-0.03 to process</li>
+                        <li>You can get $5 in free credits when you sign up</li>
+                        <li>The app works offline except for receipt processing</li>
+                      </ul>
+                    </div>
+
+                    {/* Data Management Section */}
+                    <div style={{
+                      marginTop: '2rem',
+                      paddingTop: '2rem',
+                      borderTop: '2px solid #e2e8f0'
+                    }}>
+                      <h3 style={{
+                        margin: '0 0 1rem 0',
+                        fontSize: '1.125rem',
+                        fontWeight: '700',
+                        color: '#334155'
+                      }}>Data Management</h3>
+                      
+                      <div style={{
+                        background: '#fef2f2',
+                        borderRadius: '12px',
+                        padding: '1.5rem',
+                        border: '1px solid #fecaca'
+                      }}>
+                        <p style={{
+                          color: '#7f1d1d',
+                          fontSize: '0.875rem',
+                          margin: '0 0 1rem 0',
+                          lineHeight: '1.6'
+                        }}>
+                          <strong>Clear All Data:</strong> This will permanently delete all receipts, items, and your API key from this browser.
+                        </p>
+                        <button
+                          onClick={() => {
+                            if (confirm('Are you sure? This will delete ALL your data and cannot be undone!')) {
+                              localStorage.clear();
+                              window.location.reload();
+                            }
+                          }}
+                          style={{
+                            background: '#dc2626',
+                            color: 'white',
+                            border: 'none',
+                            padding: '0.75rem 1.5rem',
+                            borderRadius: '10px',
+                            cursor: 'pointer',
+                            fontWeight: '600',
+                            fontSize: '0.875rem'
+                          }}
+                        >
+                          🗑️ Clear All Data
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
