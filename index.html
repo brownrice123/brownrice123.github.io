@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grocery Expense Tracker</title>
+    
+    <!-- Load React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Load Babel to transform JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Load Recharts for charts -->
+    <script src="https://unpkg.com/recharts@2.5.0/dist/Recharts.js"></script>
+    
+    <!-- Load Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        }
+        #root {
+            width: 100%;
+            min-height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <!-- Your React Application -->
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
+
+        // Simple icon components using Unicode symbols
+        const Icon = ({ children, size = 20 }) => (
+          <span style={{ fontSize: `${size}px`, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+            {children}
+          </span>
+        );
+
+        const Camera = ({ size }) => <Icon size={size}>📷</Icon>;
+        const Upload = ({ size }) => <Icon size={size}>⬆️</Icon>;
+        const DollarSign = ({ size }) => <Icon size={size}>💵</Icon>;
+        const ShoppingCart = ({ size }) => <Icon size={size}>🛒</Icon>;
+        const Calendar = ({ size }) => <Icon size={size}>📅</Icon>;
+        const Tag = ({ size }) => <Icon size={size}>🏷️</Icon>;
+        const Trash2 = ({ size }) => <Icon size={size}>🗑️</Icon>;
+        const Edit2 = ({ size }) => <Icon size={size}>✏️</Icon>;
+        const Save = ({ size }) => <Icon size={size}>💾</Icon>;
+        const BarChart3 = ({ size }) => <Icon size={size}>📊</Icon>;
+        const Download = ({ size }) => <Icon size={size}>⬇️</Icon>;
+
+        const GroceryExpenseTracker = () => {
+          const [receipts, setReceipts] = useState([]);
+          const [items, setItems] = useState([]);
+          const [view, setView] = useState('dashboard');
+          const [isProcessing, setIsProcessing] = useState(false);
+          const [editingItem, setEditingItem] = useState(null);
+          const [dateRange, setDateRange] = useState('all');
+          const [sortBy, setSortBy] = useState('date');
+
+          // Category definitions with colors
+          const categories = {
+            'Produce': { color: '#10b981', icon: '🥬' },
+            'Dairy': { color: '#3b82f6', icon: '🥛' },
+            'Meat': { color: '#ef4444', icon: '🥩' },
+            'Bakery': { color: '#f59e0b', icon: '🍞' },
+            'Pantry': { color: '#8b5cf6', icon: '🥫' },
+            'Snacks': { color: '#ec4899', icon: '🍿' },
+            'Beverages': { color: '#06b6d4', icon: '🥤' },
+            'Frozen': { color: '#6366f1', icon: '🧊' },
+            'Other': { color: '#64748b', icon: '🛒' }
+          };
+
+          // Load data from localStorage
+          useEffect(() => {
+            loadData();
+          }, []);
+
+          const loadData = () => {
+            try {
+              const receiptsData = localStorage.getItem('grocery-receipts');
+              const itemsData = localStorage.getItem('grocery-items');
+              
+              if (receiptsData) setReceipts(JSON.parse(receiptsData));
+              if (itemsData) setItems(JSON.parse(itemsData));
+            } catch (error) {
+              console.log('No existing data found, starting fresh');
+            }
+          };
+
+          const saveData = (newReceipts, newItems) => {
+            try {
+              localStorage.setItem('grocery-receipts', JSON.stringify(newReceipts));
+              localStorage.setItem('grocery-items', JSON.stringify(newItems));
+            } catch (error) {
+              console.error('Failed to save data:', error);
+            }
+          };
+
+          // Process receipt image with Claude
+          const processReceiptImage = async (file) => {
+            setIsProcessing(true);
+            
+            try {
+              const base64Data = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+
+              const response = await fetch("https://api.anthropic.com/v1/messages", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  model: "claude-sonnet-4-20250514",
+                  max_tokens: 1000,
+                  messages: [
+                    {
+                      role: "user",
+                      content: [
+                        {
+                          type: "image",
+                          source: {
+                            type: "base64",
+                            media_type: file.type,
+                            data: base64Data
+                          }
+                        },
+                        {
+                          type: "text",
+                          text: `Analyze this grocery receipt and extract all items with their prices. Return ONLY a JSON object (no markdown, no preamble) with this structure:
+{
+  "store": "store name",
+  "date": "YYYY-MM-DD",
+  "items": [
+    {"name": "item name", "price": 0.00, "category": "Produce|Dairy|Meat|Bakery|Pantry|Snacks|Beverages|Frozen|Other"}
+  ],
+  "total": 0.00
+}
+
+Categorize each item appropriately. If you can't read something clearly, make your best guess.`
+                        }
+                      ]
+                    }
+                  ]
+                })
+              });
+
+              const data = await response.json();
+              const text = data.content.map(item => item.text || "").join("\n");
+              const cleanText = text.replace(/\`\`\`json|\`\`\`/g, "").trim();
+              const receiptData = JSON.parse(cleanText);
+
+              // Create receipt record
+              const newReceipt = {
+                id: Date.now().toString(),
+                ...receiptData,
+                uploadDate: new Date().toISOString()
+              };
+
+              // Add items with receipt reference
+              const newItems = receiptData.items.map(item => ({
+                id: `${newReceipt.id}-${Date.now()}-${Math.random()}`,
+                ...item,
+                receiptId: newReceipt.id,
+                store: receiptData.store,
+                date: receiptData.date
+              }));
+
+              const updatedReceipts = [...receipts, newReceipt];
+              const updatedItems = [...items, ...newItems];
+              
+              setReceipts(updatedReceipts);
+              setItems(updatedItems);
+              saveData(updatedReceipts, updatedItems);
+              
+              setIsProcessing(false);
+              setView('items');
+            } catch (error) {
+              console.error('Error processing receipt:', error);
+              alert('Failed to process receipt. Please try again.');
+              setIsProcessing(false);
+            }
+          };
+
+          const handleFileUpload = (event) => {
+            const file = event.target.files[0];
+            if (file) {
+              processReceiptImage(file);
+            }
+          };
+
+          const deleteReceipt = (receiptId) => {
+            const updatedReceipts = receipts.filter(r => r.id !== receiptId);
+            const updatedItems = items.filter(i => i.receiptId !== receiptId);
+            setReceipts(updatedReceipts);
+            setItems(updatedItems);
+            saveData(updatedReceipts, updatedItems);
+          };
+
+          const deleteItem = (itemId) => {
+            const updatedItems = items.filter(i => i.id !== itemId);
+            setItems(updatedItems);
+            saveData(receipts, updatedItems);
+          };
+
+          const updateItem = (itemId, updates) => {
+            const updatedItems = items.map(i => 
+              i.id === itemId ? { ...i, ...updates } : i
+            );
+            setItems(updatedItems);
+            saveData(receipts, updatedItems);
+            setEditingItem(null);
+          };
+
+          // Filter items by date range
+          const getFilteredItems = () => {
+            if (dateRange === 'all') return items;
+            
+            const now = new Date();
+            const cutoffDate = new Date();
+            
+            switch (dateRange) {
+              case '7days':
+                cutoffDate.setDate(now.getDate() - 7);
+                break;
+              case '30days':
+                cutoffDate.setDate(now.getDate() - 30);
+                break;
+              case '90days':
+                cutoffDate.setDate(now.getDate() - 90);
+                break;
+              default:
+                return items;
+            }
+            
+            return items.filter(item => new Date(item.date) >= cutoffDate);
+          };
+
+          // Calculate statistics
+          const filteredItems = getFilteredItems();
+          const totalSpent = filteredItems.reduce((sum, item) => sum + item.price, 0);
+          const categoryTotals = filteredItems.reduce((acc, item) => {
+            acc[item.category] = (acc[item.category] || 0) + item.price;
+            return acc;
+          }, {});
+
+          const categoryData = Object.entries(categoryTotals).map(([name, value]) => ({
+            name,
+            value: parseFloat(value.toFixed(2)),
+            color: categories[name]?.color || '#64748b'
+          }));
+
+          // Store spending over time
+          const storeData = filteredItems.reduce((acc, item) => {
+            acc[item.store] = (acc[item.store] || 0) + item.price;
+            return acc;
+          }, {});
+
+          const storeChartData = Object.entries(storeData).map(([name, value]) => ({
+            name,
+            amount: parseFloat(value.toFixed(2))
+          }));
+
+          // Monthly spending trend
+          const monthlyData = filteredItems.reduce((acc, item) => {
+            const month = item.date.substring(0, 7);
+            acc[month] = (acc[month] || 0) + item.price;
+            return acc;
+          }, {});
+
+          const trendData = Object.entries(monthlyData)
+            .sort()
+            .map(([month, amount]) => ({
+              month,
+              amount: parseFloat(amount.toFixed(2))
+            }));
+
+          const exportToCSV = () => {
+            const headers = ['Date', 'Store', 'Item', 'Category', 'Price'];
+            const rows = filteredItems.map(item => [
+              item.date,
+              item.store,
+              item.name,
+              item.category,
+              item.price.toFixed(2)
+            ]);
+            
+            const csv = [
+              headers.join(','),
+              ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+            ].join('\n');
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `grocery-expenses-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+          };
+
+          return (
+            <div style={{
+              minHeight: '100vh',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif',
+              padding: '2rem'
+            }}>
+              <div style={{
+                maxWidth: '1400px',
+                margin: '0 auto'
+              }}>
+                {/* Header */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  borderRadius: '24px',
+                  padding: '2rem',
+                  marginBottom: '2rem',
+                  boxShadow: '0 20px 60px rgba(0, 0, 0, 0.15)'
+                }}>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '1.5rem'
+                  }}>
+                    <div>
+                      <h1 style={{
+                        fontSize: '2.5rem',
+                        fontWeight: '800',
+                        background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                        WebkitBackgroundClip: 'text',
+                        WebkitTextFillColor: 'transparent',
+                        margin: '0 0 0.5rem 0'
+                      }}>
+                        Grocery Tracker
+                      </h1>
+                      <p style={{
+                        margin: 0,
+                        color: '#64748b',
+                        fontSize: '1rem'
+                      }}>
+                        Track expenses • Analyze spending • Save money
+                      </p>
+                    </div>
+                    
+                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                      <label style={{
+                        background: isProcessing ? '#94a3b8' : 'linear-gradient(135deg, #667eea, #764ba2)',
+                        color: 'white',
+                        padding: '0.875rem 1.75rem',
+                        borderRadius: '12px',
+                        cursor: isProcessing ? 'not-allowed' : 'pointer',
+                        fontWeight: '600',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        border: 'none',
+                        fontSize: '0.95rem',
+                        boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+                        transition: 'all 0.3s ease'
+                      }}>
+                        <Upload size={20} />
+                        {isProcessing ? 'Processing...' : 'Upload Receipt'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleFileUpload}
+                          disabled={isProcessing}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                      
+                      <button
+                        onClick={exportToCSV}
+                        disabled={filteredItems.length === 0}
+                        style={{
+                          background: 'white',
+                          color: '#667eea',
+                          border: '2px solid #667eea',
+                          padding: '0.875rem 1.75rem',
+                          borderRadius: '12px',
+                          cursor: filteredItems.length === 0 ? 'not-allowed' : 'pointer',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          fontSize: '0.95rem',
+                          opacity: filteredItems.length === 0 ? 0.5 : 1,
+                          transition: 'all 0.3s ease'
+                        }}
+                      >
+                        <Download size={20} />
+                        Export CSV
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Navigation */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  borderRadius: '16px',
+                  padding: '0.5rem',
+                  marginBottom: '2rem',
+                  display: 'flex',
+                  gap: '0.5rem',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                }}>
+                  {[
+                    { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
+                    { id: 'items', icon: ShoppingCart, label: 'Items' },
+                    { id: 'receipts', icon: Camera, label: 'Receipts' }
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setView(tab.id)}
+                      style={{
+                        flex: 1,
+                        padding: '0.875rem',
+                        border: 'none',
+                        borderRadius: '12px',
+                        background: view === tab.id ? 'linear-gradient(135deg, #667eea, #764ba2)' : 'transparent',
+                        color: view === tab.id ? 'white' : '#64748b',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.5rem',
+                        transition: 'all 0.3s ease',
+                        fontSize: '0.95rem'
+                      }}
+                    >
+                      <tab.icon size={20} />
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dashboard View */}
+                {view === 'dashboard' && (
+                  <div>
+                    {/* Date Range Filter */}
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.95)',
+                      borderRadius: '16px',
+                      padding: '1.5rem',
+                      marginBottom: '2rem',
+                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                    }}>
+                      <label style={{
+                        display: 'block',
+                        marginBottom: '0.75rem',
+                        fontWeight: '600',
+                        color: '#334155',
+                        fontSize: '0.95rem'
+                      }}>
+                        Time Period
+                      </label>
+                      <select
+                        value={dateRange}
+                        onChange={(e) => setDateRange(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '0.875rem',
+                          borderRadius: '12px',
+                          border: '2px solid #e2e8f0',
+                          fontSize: '0.95rem',
+                          fontWeight: '500',
+                          cursor: 'pointer',
+                          background: 'white'
+                        }}
+                      >
+                        <option value="all">All Time</option>
+                        <option value="7days">Last 7 Days</option>
+                        <option value="30days">Last 30 Days</option>
+                        <option value="90days">Last 90 Days</option>
+                      </select>
+                    </div>
+
+                    {/* Summary Cards */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                      gap: '1.5rem',
+                      marginBottom: '2rem'
+                    }}>
+                      <div style={{
+                        background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                        borderRadius: '20px',
+                        padding: '2rem',
+                        color: 'white',
+                        boxShadow: '0 12px 32px rgba(102, 126, 234, 0.3)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                          <div style={{
+                            background: 'rgba(255, 255, 255, 0.2)',
+                            borderRadius: '12px',
+                            padding: '0.75rem',
+                            display: 'flex'
+                          }}>
+                            <DollarSign size={24} />
+                          </div>
+                          <div style={{ fontSize: '0.95rem', fontWeight: '500', opacity: 0.9 }}>Total Spent</div>
+                        </div>
+                        <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>${totalSpent.toFixed(2)}</div>
+                        <div style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.5rem' }}>
+                          {filteredItems.length} items tracked
+                        </div>
+                      </div>
+
+                      <div style={{
+                        background: 'white',
+                        borderRadius: '20px',
+                        padding: '2rem',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                          <div style={{
+                            background: 'linear-gradient(135deg, #10b981, #059669)',
+                            borderRadius: '12px',
+                            padding: '0.75rem',
+                            display: 'flex',
+                            color: 'white'
+                          }}>
+                            <ShoppingCart size={24} />
+                          </div>
+                          <div style={{ fontSize: '0.95rem', fontWeight: '600', color: '#64748b' }}>Receipts</div>
+                        </div>
+                        <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#334155' }}>
+                          {receipts.length}
+                        </div>
+                        <div style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.5rem' }}>
+                          Total uploaded
+                        </div>
+                      </div>
+
+                      <div style={{
+                        background: 'white',
+                        borderRadius: '20px',
+                        padding: '2rem',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                          <div style={{
+                            background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                            borderRadius: '12px',
+                            padding: '0.75rem',
+                            display: 'flex',
+                            color: 'white'
+                          }}>
+                            <Tag size={24} />
+                          </div>
+                          <div style={{ fontSize: '0.95rem', fontWeight: '600', color: '#64748b' }}>Categories</div>
+                        </div>
+                        <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#334155' }}>
+                          {Object.keys(categoryTotals).length}
+                        </div>
+                        <div style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.5rem' }}>
+                          Active categories
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Charts */}
+                    {filteredItems.length > 0 ? (
+                      <>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))',
+                          gap: '2rem',
+                          marginBottom: '2rem'
+                        }}>
+                          {/* Category Breakdown */}
+                          <div style={{
+                            background: 'white',
+                            borderRadius: '20px',
+                            padding: '2rem',
+                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                          }}>
+                            <h3 style={{
+                              margin: '0 0 1.5rem 0',
+                              fontSize: '1.25rem',
+                              fontWeight: '700',
+                              color: '#334155'
+                            }}>Spending by Category</h3>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <PieChart>
+                                <Pie
+                                  data={categoryData}
+                                  cx="50%"
+                                  cy="50%"
+                                  labelLine={false}
+                                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                  outerRadius={100}
+                                  fill="#8884d8"
+                                  dataKey="value"
+                                >
+                                  {categoryData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                  ))}
+                                </Pie>
+                                <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          {/* Category Breakdown - Stacked Bar */}
+                          <div style={{
+                            background: 'white',
+                            borderRadius: '20px',
+                            padding: '2rem',
+                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                          }}>
+                            <h3 style={{
+                              margin: '0 0 1.5rem 0',
+                              fontSize: '1.25rem',
+                              fontWeight: '700',
+                              color: '#334155'
+                            }}>Categories by Store</h3>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <BarChart data={(() => {
+                                // Build stacked data: one row per store, columns for each category
+                                const storeCategories = {};
+                                filteredItems.forEach(item => {
+                                  if (!storeCategories[item.store]) {
+                                    storeCategories[item.store] = { name: item.store };
+                                  }
+                                  const cat = item.category;
+                                  storeCategories[item.store][cat] = (storeCategories[item.store][cat] || 0) + item.price;
+                                });
+                                return Object.values(storeCategories);
+                              })()}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                <XAxis dataKey="name" stroke="#64748b" />
+                                <YAxis stroke="#64748b" />
+                                <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+                                <Legend />
+                                {Object.keys(categories).map(cat => (
+                                  <Bar 
+                                    key={cat} 
+                                    dataKey={cat} 
+                                    stackId="a" 
+                                    fill={categories[cat].color}
+                                    radius={[0, 0, 0, 0]}
+                                  />
+                                ))}
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+
+                        {/* Store Spending - Total */}
+                        <div style={{
+                          background: 'white',
+                          borderRadius: '20px',
+                          padding: '2rem',
+                          marginBottom: '2rem',
+                          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                        }}>
+                          <h3 style={{
+                            margin: '0 0 1.5rem 0',
+                            fontSize: '1.25rem',
+                            fontWeight: '700',
+                            color: '#334155'
+                          }}>Total Spending by Store</h3>
+                          <ResponsiveContainer width="100%" height={300}>
+                            <BarChart data={storeChartData}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                              <XAxis dataKey="name" stroke="#64748b" />
+                              <YAxis stroke="#64748b" />
+                              <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+                              <Bar dataKey="amount" fill="url(#colorGradient)" radius={[8, 8, 0, 0]} />
+                              <defs>
+                                <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="#667eea" stopOpacity={1} />
+                                  <stop offset="100%" stopColor="#764ba2" stopOpacity={1} />
+                                </linearGradient>
+                              </defs>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+
+                        {/* Spending Trend */}
+                        {trendData.length > 1 && (
+                          <div style={{
+                            background: 'white',
+                            borderRadius: '20px',
+                            padding: '2rem',
+                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                          }}>
+                            <h3 style={{
+                              margin: '0 0 1.5rem 0',
+                              fontSize: '1.25rem',
+                              fontWeight: '700',
+                              color: '#334155'
+                            }}>Spending Trend</h3>
+                            <ResponsiveContainer width="100%" height={300}>
+                              <LineChart data={trendData}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                <XAxis dataKey="month" stroke="#64748b" />
+                                <YAxis stroke="#64748b" />
+                                <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+                                <Line
+                                  type="monotone"
+                                  dataKey="amount"
+                                  stroke="#667eea"
+                                  strokeWidth={3}
+                                  dot={{ fill: '#667eea', r: 5 }}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{
+                        background: 'white',
+                        borderRadius: '20px',
+                        padding: '4rem 2rem',
+                        textAlign: 'center',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <Camera size={64} style={{ color: '#cbd5e1', margin: '0 auto 1rem' }} />
+                        <h3 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#334155', marginBottom: '0.5rem' }}>
+                          No Data Yet
+                        </h3>
+                        <p style={{ color: '#64748b', marginBottom: '2rem' }}>
+                          Upload your first receipt to start tracking expenses
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Items View */}
+                {view === 'items' && (
+                  <div style={{
+                    background: 'white',
+                    borderRadius: '20px',
+                    padding: '2rem',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                  }}>
+                    <h2 style={{
+                      margin: '0 0 1.5rem 0',
+                      fontSize: '1.5rem',
+                      fontWeight: '700',
+                      color: '#334155'
+                    }}>All Items ({filteredItems.length})</h2>
+                    
+                    {filteredItems.length > 0 ? (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Date</th>
+                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Store</th>
+                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Item</th>
+                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Category</th>
+                              <th 
+                                style={{ 
+                                  padding: '1rem', 
+                                  textAlign: 'right', 
+                                  fontWeight: '600', 
+                                  color: '#64748b',
+                                  cursor: 'pointer',
+                                  userSelect: 'none'
+                                }}
+                                onClick={() => setSortBy(sortBy === 'price' ? 'date' : 'price')}
+                              >
+                                Price {sortBy === 'price' ? '▼' : ''}
+                              </th>
+                              <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#64748b' }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredItems.sort((a, b) => {
+                              if (sortBy === 'price') {
+                                return b.price - a.price; // Descending by price
+                              }
+                              return new Date(b.date) - new Date(a.date); // Descending by date
+                            }).map(item => (
+                              <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                {editingItem === item.id ? (
+                                  <>
+                                    <td style={{ padding: '1rem' }}>
+                                      <input
+                                        type="date"
+                                        defaultValue={item.date}
+                                        onBlur={(e) => updateItem(item.id, { date: e.target.value })}
+                                        style={{
+                                          padding: '0.5rem',
+                                          borderRadius: '8px',
+                                          border: '1px solid #e2e8f0',
+                                          width: '100%'
+                                        }}
+                                      />
+                                    </td>
+                                    <td style={{ padding: '1rem' }}>
+                                      <input
+                                        type="text"
+                                        defaultValue={item.store}
+                                        onBlur={(e) => updateItem(item.id, { store: e.target.value })}
+                                        style={{
+                                          padding: '0.5rem',
+                                          borderRadius: '8px',
+                                          border: '1px solid #e2e8f0',
+                                          width: '100%'
+                                        }}
+                                      />
+                                    </td>
+                                    <td style={{ padding: '1rem' }}>
+                                      <input
+                                        type="text"
+                                        defaultValue={item.name}
+                                        onBlur={(e) => updateItem(item.id, { name: e.target.value })}
+                                        style={{
+                                          padding: '0.5rem',
+                                          borderRadius: '8px',
+                                          border: '1px solid #e2e8f0',
+                                          width: '100%'
+                                        }}
+                                      />
+                                    </td>
+                                    <td style={{ padding: '1rem' }}>
+                                      <select
+                                        defaultValue={item.category}
+                                        onChange={(e) => updateItem(item.id, { category: e.target.value })}
+                                        style={{
+                                          padding: '0.5rem',
+                                          borderRadius: '8px',
+                                          border: '1px solid #e2e8f0',
+                                          width: '100%'
+                                        }}
+                                      >
+                                        {Object.keys(categories).map(cat => (
+                                          <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                    <td style={{ padding: '1rem', textAlign: 'right' }}>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        defaultValue={item.price}
+                                        onBlur={(e) => updateItem(item.id, { price: parseFloat(e.target.value) })}
+                                        style={{
+                                          padding: '0.5rem',
+                                          borderRadius: '8px',
+                                          border: '1px solid #e2e8f0',
+                                          width: '100%',
+                                          textAlign: 'right'
+                                        }}
+                                      />
+                                    </td>
+                                    <td style={{ padding: '1rem', textAlign: 'right' }}>
+                                      <button
+                                        onClick={() => setEditingItem(null)}
+                                        style={{
+                                          background: '#10b981',
+                                          color: 'white',
+                                          border: 'none',
+                                          borderRadius: '8px',
+                                          padding: '0.5rem',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        <Save size={16} />
+                                      </button>
+                                    </td>
+                                  </>
+                                ) : (
+                                  <>
+                                    <td style={{ padding: '1rem', color: '#334155' }}>{item.date}</td>
+                                    <td style={{ padding: '1rem', color: '#334155' }}>{item.store}</td>
+                                    <td style={{ padding: '1rem', color: '#334155', fontWeight: '500' }}>{item.name}</td>
+                                    <td style={{ padding: '1rem' }}>
+                                      <span style={{
+                                        background: `${categories[item.category]?.color}15`,
+                                        color: categories[item.category]?.color,
+                                        padding: '0.375rem 0.75rem',
+                                        borderRadius: '8px',
+                                        fontSize: '0.875rem',
+                                        fontWeight: '600',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem'
+                                      }}>
+                                        {categories[item.category]?.icon} {item.category}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#334155' }}>
+                                      ${item.price.toFixed(2)}
+                                    </td>
+                                    <td style={{ padding: '1rem', textAlign: 'right' }}>
+                                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                                        <button
+                                          onClick={() => setEditingItem(item.id)}
+                                          style={{
+                                            background: '#667eea',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            padding: '0.5rem',
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          <Edit2 size={16} />
+                                        </button>
+                                        <button
+                                          onClick={() => deleteItem(item.id)}
+                                          style={{
+                                            background: '#ef4444',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            padding: '0.5rem',
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                        <ShoppingCart size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                        <p>No items found. Upload a receipt to get started!</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Receipts View */}
+                {view === 'receipts' && (
+                  <div style={{
+                    background: 'white',
+                    borderRadius: '20px',
+                    padding: '2rem',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                  }}>
+                    <h2 style={{
+                      margin: '0 0 1.5rem 0',
+                      fontSize: '1.5rem',
+                      fontWeight: '700',
+                      color: '#334155'
+                    }}>Receipts ({receipts.length})</h2>
+                    
+                    {receipts.length > 0 ? (
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+                        gap: '1.5rem'
+                      }}>
+                        {receipts.sort((a, b) => new Date(b.date) - new Date(a.date)).map(receipt => (
+                          <div
+                            key={receipt.id}
+                            style={{
+                              border: '2px solid #e2e8f0',
+                              borderRadius: '16px',
+                              padding: '1.5rem',
+                              transition: 'all 0.3s ease',
+                              cursor: 'pointer'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = '#667eea';
+                              e.currentTarget.style.boxShadow = '0 8px 24px rgba(102, 126, 234, 0.15)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = '#e2e8f0';
+                              e.currentTarget.style.boxShadow = 'none';
+                            }}
+                          >
+                            <div style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'start',
+                              marginBottom: '1rem'
+                            }}>
+                              <div>
+                                <h3 style={{
+                                  margin: '0 0 0.5rem 0',
+                                  fontSize: '1.25rem',
+                                  fontWeight: '700',
+                                  color: '#334155'
+                                }}>{receipt.store}</h3>
+                                <p style={{
+                                  margin: 0,
+                                  color: '#64748b',
+                                  fontSize: '0.875rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.5rem'
+                                }}>
+                                  <Calendar size={14} />
+                                  {receipt.date}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => deleteReceipt(receipt.id)}
+                                style={{
+                                  background: '#fee2e2',
+                                  color: '#ef4444',
+                                  border: 'none',
+                                  borderRadius: '8px',
+                                  padding: '0.5rem',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                            
+                            <div style={{
+                              background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                              borderRadius: '12px',
+                              padding: '1.5rem',
+                              color: 'white',
+                              marginBottom: '1rem'
+                            }}>
+                              <div style={{ fontSize: '0.875rem', opacity: 0.9, marginBottom: '0.25rem' }}>
+                                Total Amount
+                              </div>
+                              <div style={{ fontSize: '2rem', fontWeight: '800' }}>
+                                ${receipt.total.toFixed(2)}
+                              </div>
+                            </div>
+                            
+                            <div style={{
+                              color: '#64748b',
+                              fontSize: '0.875rem'
+                            }}>
+                              {receipt.items.length} items
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                        <Camera size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                        <p>No receipts uploaded yet. Click "Upload Receipt" to get started!</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<GroceryExpenseTracker />);
+    </script>
+</body>
+</html>
