@@ -169,12 +169,22 @@
                 };
                 reader.onerror = () => {
                   console.error('Step 2b: File read failed');
+                  reject(new Error('Failed to read file'));
+                };
+                reader.readAsDataURL(file);
               });
               
-              console.log('Step 3: Making API request...');
-              console.log('API Key:', apiKey.substring(0, 20) + '...');
+              console.log('Step 3: Making API request through proxy...');
+              
+              // IMPORTANT: Replace this URL with your Cloudflare Worker URL
+              // Example: https://grocery-proxy.yourname.workers.dev
+              const WORKER_URL = "https://yellow-bonus-b680.brweiss-123.workers.dev/";
+              
+              if (WORKER_URL === "YOUR_CLOUDFLARE_WORKER_URL_HERE") {
+                throw new Error('Please set up your Cloudflare Worker and update WORKER_URL in the code.\n\nSee CLOUDFLARE-SETUP.md for instructions.');
+              }
 
-              const response = await fetch("https://yellow-bonus-b680.brweiss-123.workers.dev/", {
+              const response = await fetch(WORKER_URL, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json"
