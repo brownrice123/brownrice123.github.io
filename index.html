@@ -155,15 +155,27 @@
               return;
             }
 
+            console.log('Step 1: Starting receipt processing...');
+            console.log('File:', file.name, file.type, file.size);
             setIsProcessing(true);
             
             try {
+              console.log('Step 2: Reading file as base64...');
               const base64Data = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
-                reader.onload = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = reject;
+                reader.onload = () => {
+                  console.log('Step 2a: File read successfully');
+                  resolve(reader.result.split(',')[1]);
+                };
+                reader.onerror = () => {
+                  console.error('Step 2b: File read failed');
+                  reject(new Error('Failed to read file'));
+                };
                 reader.readAsDataURL(file);
               });
+              
+              console.log('Step 3: Making API request...');
+              console.log('API Key:', apiKey.substring(0, 20) + '...');
 
               const response = await fetch("https://api.anthropic.com/v1/messages", {
                 method: "POST",
@@ -206,16 +218,22 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                   ]
                 })
               });
+              
+              console.log('Step 4: Got response, status:', response.status);
 
               if (!response.ok) {
                 const errorData = await response.json();
+                console.error('Step 4a: API error:', errorData);
                 throw new Error(errorData.error?.message || 'API request failed');
               }
 
+              console.log('Step 5: Parsing response...');
               const data = await response.json();
               const text = data.content.map(item => item.text || "").join("\n");
               const cleanText = text.replace(/\`\`\`json|\`\`\`/g, "").trim();
               const receiptData = JSON.parse(cleanText);
+              
+              console.log('Step 6: Parsed receipt data:', receiptData);
 
               // Create receipt record
               const newReceipt = {
@@ -240,11 +258,23 @@ Categorize each item appropriately. If you can't read something clearly, make yo
               setItems(updatedItems);
               saveData(updatedReceipts, updatedItems);
               
+              console.log('Step 7: Success! Added', newItems.length, 'items');
               setIsProcessing(false);
               setView('items');
             } catch (error) {
-              console.error('Error processing receipt:', error);
-              alert(`Failed to process receipt: ${error.message}\n\nPlease check your API key and try again.`);
+              console.error('❌ Error at some step:', error);
+              console.error('Error name:', error.name);
+              console.error('Error message:', error.message);
+              console.error('Error stack:', error.stack);
+              
+              let userMessage = `Failed to process receipt: ${error.message}`;
+              
+              // Provide more helpful error messages
+              if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+                userMessage = 'Network error: Cannot reach Anthropic API.\n\nThis might be caused by:\n• Browser blocking the request\n• Network/firewall restrictions\n• Ad blocker or privacy extension\n\nTry:\n• Disabling browser extensions\n• Using a different browser\n• Checking console for details (F12)';
+              }
+              
+              alert(userMessage);
               setIsProcessing(false);
             }
           };
