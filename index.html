@@ -13,7 +13,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <!-- Load Recharts for charts -->
-    <script src="https://unpkg.com/recharts@2.12.7/dist/Recharts.js" onload="console.log('Recharts loaded:', typeof Recharts)"></script>
+    <script src="https://cdn.jsdelivr.net/npm/recharts@2.5.0/dist/Recharts.js" onload="console.log('Recharts loaded:', typeof Recharts)"></script>
     
     <!-- Load Google Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -81,6 +81,7 @@
           const [sortBy, setSortBy] = useState('date');
           const [apiKey, setApiKey] = useState('');
           const [tempApiKey, setTempApiKey] = useState('');
+          const [categoryFilter, setCategoryFilter] = useState('all');
 
           // Category definitions with colors
           const categories = {
@@ -284,11 +285,23 @@ Categorize each item appropriately. If you can't read something clearly, make yo
             }
           };
 
-          const handleFileUpload = (event) => {
-            const file = event.target.files[0];
-            if (file) {
-              processReceiptImage(file);
+          const handleFileUpload = async (event) => {
+            const files = Array.from(event.target.files);
+            if (files.length === 0) return;
+            
+            console.log(`Processing ${files.length} receipt(s)...`);
+            
+            for (let i = 0; i < files.length; i++) {
+              console.log(`Processing receipt ${i + 1} of ${files.length}`);
+              await processReceiptImage(files[i]);
+              
+              // Small delay between uploads to avoid rate limiting
+              if (i < files.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
             }
+            
+            alert(`Successfully processed ${files.length} receipt(s)!`);
           };
 
           const deleteReceipt = (receiptId) => {
@@ -467,6 +480,7 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                         <input
                           type="file"
                           accept="image/*"
+                          multiple
                           onChange={handleFileUpload}
                           disabled={isProcessing}
                           style={{ display: 'none' }}
@@ -512,6 +526,7 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                   {[
                     { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
                     { id: 'items', icon: ShoppingCart, label: 'Items' },
+                    { id: 'byitem', icon: Tag, label: 'By Item' },
                     { id: 'receipts', icon: Camera, label: 'Receipts' },
                     { id: 'settings', icon: Settings, label: 'Settings' }
                   ].map(tab => (
@@ -845,14 +860,56 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                     padding: '2rem',
                     boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
                   }}>
-                    <h2 style={{
-                      margin: '0 0 1.5rem 0',
-                      fontSize: '1.5rem',
-                      fontWeight: '700',
-                      color: '#334155'
-                    }}>All Items ({filteredItems.length})</h2>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      marginBottom: '1.5rem',
+                      flexWrap: 'wrap',
+                      gap: '1rem'
+                    }}>
+                      <h2 style={{
+                        margin: 0,
+                        fontSize: '1.5rem',
+                        fontWeight: '700',
+                        color: '#334155'
+                      }}>All Items ({filteredItems.filter(item => categoryFilter === 'all' || item.category === categoryFilter).length})</h2>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <label style={{ fontWeight: '600', color: '#64748b', fontSize: '0.9rem' }}>
+                          Filter by:
+                        </label>
+                        <select
+                          value={categoryFilter}
+                          onChange={(e) => setCategoryFilter(e.target.value)}
+                          style={{
+                            padding: '0.625rem 1rem',
+                            borderRadius: '10px',
+                            border: '2px solid #e2e8f0',
+                            fontSize: '0.9rem',
+                            fontWeight: '500',
+                            cursor: 'pointer',
+                            background: 'white',
+                            color: '#334155'
+                          }}
+                        >
+                          <option value="all">All Categories</option>
+                          {Object.keys(categories).map(cat => (
+                            <option key={cat} value={cat}>
+                              {categories[cat].icon} {cat}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
                     
-                    {filteredItems.length > 0 ? (
+                    {(() => {
+                      const displayItems = filteredItems.filter(item => 
+                        categoryFilter === 'all' || item.category === categoryFilter
+                      );
+                      
+                      return displayItems.length > 0 ? (
+                      return displayItems.length > 0 ? (
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead>
@@ -878,7 +935,7 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                             </tr>
                           </thead>
                           <tbody>
-                            {filteredItems.sort((a, b) => {
+                            {displayItems.sort((a, b) => {
                               if (sortBy === 'price') {
                                 return b.price - a.price; // Descending by price
                               }
@@ -1036,9 +1093,10 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                     ) : (
                       <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
                         <ShoppingCart size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                        <p>No items found. Upload a receipt to get started!</p>
+                        <p>No items found{categoryFilter !== 'all' ? ` in ${categoryFilter} category` : ''}. {categoryFilter !== 'all' ? 'Try a different category or upload more receipts!' : 'Upload a receipt to get started!'}</p>
                       </div>
-                    )}
+                    );
+                    })()}
                   </div>
                 )}
 
@@ -1152,6 +1210,123 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                         <p>No receipts uploaded yet. Click "Upload Receipt" to get started!</p>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* By Item View - Grouped */}
+                {view === 'byitem' && (
+                  <div style={{
+                    background: 'white',
+                    borderRadius: '20px',
+                    padding: '2rem',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                  }}>
+                    <h2 style={{
+                      margin: '0 0 1.5rem 0',
+                      fontSize: '1.5rem',
+                      fontWeight: '700',
+                      color: '#334155'
+                    }}>Spending by Item</h2>
+                    
+                    {(() => {
+                      // Group items by name (case-insensitive, trimmed)
+                      const grouped = filteredItems.reduce((acc, item) => {
+                        const key = item.name.toLowerCase().trim();
+                        if (!acc[key]) {
+                          acc[key] = {
+                            name: item.name,
+                            category: item.category,
+                            totalSpent: 0,
+                            count: 0,
+                            avgPrice: 0,
+                            purchases: []
+                          };
+                        }
+                        acc[key].totalSpent += item.price;
+                        acc[key].count += 1;
+                        acc[key].purchases.push({
+                          date: item.date,
+                          store: item.store,
+                          price: item.price
+                        });
+                        return acc;
+                      }, {});
+                      
+                      // Convert to array and calculate averages
+                      const groupedArray = Object.values(grouped).map(item => ({
+                        ...item,
+                        avgPrice: item.totalSpent / item.count
+                      }));
+                      
+                      // Sort by total spent (descending)
+                      groupedArray.sort((a, b) => b.totalSpent - a.totalSpent);
+                      
+                      return groupedArray.length > 0 ? (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                                <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Item</th>
+                                <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Category</th>
+                                <th style={{ padding: '1rem', textAlign: 'center', fontWeight: '600', color: '#64748b' }}>Purchases</th>
+                                <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#64748b' }}>Total Spent</th>
+                                <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#64748b' }}>Avg Price</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {groupedArray.map((item, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '1rem', color: '#334155', fontWeight: '500' }}>
+                                    {item.name}
+                                    <details style={{ marginTop: '0.5rem' }}>
+                                      <summary style={{ cursor: 'pointer', fontSize: '0.875rem', color: '#667eea' }}>
+                                        View {item.count} purchase{item.count > 1 ? 's' : ''}
+                                      </summary>
+                                      <div style={{ marginTop: '0.5rem', paddingLeft: '1rem' }}>
+                                        {item.purchases.sort((a, b) => new Date(b.date) - new Date(a.date)).map((purchase, i) => (
+                                          <div key={i} style={{ fontSize: '0.875rem', color: '#64748b', padding: '0.25rem 0' }}>
+                                            {purchase.date} • {purchase.store} • ${purchase.price.toFixed(2)}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </details>
+                                  </td>
+                                  <td style={{ padding: '1rem' }}>
+                                    <span style={{
+                                      background: `${categories[item.category]?.color}15`,
+                                      color: categories[item.category]?.color,
+                                      padding: '0.375rem 0.75rem',
+                                      borderRadius: '8px',
+                                      fontSize: '0.875rem',
+                                      fontWeight: '600',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.25rem'
+                                    }}>
+                                      {categories[item.category]?.icon} {item.category}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '1rem', textAlign: 'center', color: '#334155', fontWeight: '600' }}>
+                                    {item.count}x
+                                  </td>
+                                  <td style={{ padding: '1rem', textAlign: 'right', fontWeight: '700', color: '#667eea', fontSize: '1.1rem' }}>
+                                    ${item.totalSpent.toFixed(2)}
+                                  </td>
+                                  <td style={{ padding: '1rem', textAlign: 'right', color: '#64748b' }}>
+                                    ${item.avgPrice.toFixed(2)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
+                          <Tag size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
+                          <p>No items to group yet. Upload receipts to get started!</p>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
