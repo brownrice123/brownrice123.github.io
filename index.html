@@ -12,8 +12,8 @@
     <!-- Load Babel to transform JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Load Recharts for charts -->
-    <script src="https://unpkg.com/recharts@2.5.0/dist/Recharts.js"></script>
+    <!-- Load Chart.js for charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     
     <!-- Load Google API Client Library -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -40,20 +40,125 @@
     <div id="root"></div>
     
     <script type="text/babel">
-        const { useState, useEffect } = React;
-        
-        // Check if Recharts loaded
-        let BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer;
-        
-        if (typeof Recharts !== 'undefined') {
-          ({ BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts);
-        } else {
-          console.warn('Recharts not loaded - charts will not display');
-          const DummyChart = () => React.createElement('div', {
-            style: { padding: '2rem', background: '#fee', borderRadius: '12px', textAlign: 'center' }
-          }, 'Charts loading... Please refresh if this persists.');
-          BarChart = Bar = PieChart = Pie = Cell = LineChart = Line = XAxis = YAxis = CartesianGrid = Tooltip = Legend = ResponsiveContainer = DummyChart;
-        }
+        const { useState, useEffect, useRef } = React;
+
+        // Chart.js Components
+        const PieChartComponent = ({ data, title }) => {
+          const canvasRef = useRef(null);
+          const chartRef = useRef(null);
+
+          useEffect(() => {
+            if (canvasRef.current && data.length > 0) {
+              // Destroy existing chart
+              if (chartRef.current) {
+                chartRef.current.destroy();
+              }
+
+              const ctx = canvasRef.current.getContext('2d');
+              chartRef.current = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                  labels: data.map(d => d.name),
+                  datasets: [{
+                    data: data.map(d => d.value),
+                    backgroundColor: data.map(d => d.color),
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    legend: {
+                      position: 'bottom',
+                      labels: {
+                        padding: 15,
+                        font: { size: 12 }
+                      }
+                    },
+                    tooltip: {
+                      callbacks: {
+                        label: (context) => {
+                          const label = context.label || '';
+                          const value = context.parsed || 0;
+                          const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                          const percent = ((value / total) * 100).toFixed(0);
+                          return `${label}: $${value.toFixed(2)} (${percent}%)`;
+                        }
+                      }
+                    }
+                  }
+                }
+              });
+            }
+
+            return () => {
+              if (chartRef.current) {
+                chartRef.current.destroy();
+              }
+            };
+          }, [data]);
+
+          return <canvas ref={canvasRef} style={{ maxHeight: '300px' }} />;
+        };
+
+        const BarChartComponent = ({ data, title }) => {
+          const canvasRef = useRef(null);
+          const chartRef = useRef(null);
+
+          useEffect(() => {
+            if (canvasRef.current && data.length > 0) {
+              if (chartRef.current) {
+                chartRef.current.destroy();
+              }
+
+              const ctx = canvasRef.current.getContext('2d');
+              chartRef.current = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                  labels: data.map(d => d.name),
+                  datasets: [{
+                    label: 'Amount ($)',
+                    data: data.map(d => d.amount),
+                    backgroundColor: 'rgba(102, 126, 234, 0.8)',
+                    borderColor: 'rgba(102, 126, 234, 1)',
+                    borderWidth: 2,
+                    borderRadius: 8
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                      callbacks: {
+                        label: (context) => `$${context.parsed.y.toFixed(2)}`
+                      }
+                    }
+                  },
+                  scales: {
+                    y: {
+                      beginAtZero: true,
+                      ticks: {
+                        callback: (value) => `$${value}`
+                      }
+                    }
+                  }
+                }
+              });
+            }
+
+            return () => {
+              if (chartRef.current) {
+                chartRef.current.destroy();
+              }
+            };
+          }, [data]);
+
+          return <canvas ref={canvasRef} style={{ maxHeight: '300px' }} />;
+        };
 
         // ==================== CONFIGURATION ====================
         const CONFIG = {
@@ -970,24 +1075,9 @@
                                 fontWeight: '700',
                                 color: '#334155'
                               }}>Spending by Category</h3>
-                              <ResponsiveContainer width="100%" height={300}>
-                                <PieChart>
-                                  <Pie
-                                    data={categoryData}
-                                    cx="50%"
-                                    cy="50%"
-                                    labelLine={false}
-                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                                    outerRadius={100}
-                                    dataKey="value"
-                                  >
-                                    {categoryData.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={entry.color} />
-                                    ))}
-                                  </Pie>
-                                  <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                                </PieChart>
-                              </ResponsiveContainer>
+                              <div style={{ height: '300px' }}>
+                                <PieChartComponent data={categoryData} title="Spending by Category" />
+                              </div>
                             </div>
                           )}
 
@@ -1005,21 +1095,9 @@
                                 fontWeight: '700',
                                 color: '#334155'
                               }}>Spending by Store</h3>
-                              <ResponsiveContainer width="100%" height={300}>
-                                <BarChart data={storeChartData}>
-                                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                  <XAxis dataKey="name" stroke="#64748b" />
-                                  <YAxis stroke="#64748b" />
-                                  <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                                  <Bar dataKey="amount" fill="url(#colorGradient)" radius={[8, 8, 0, 0]} />
-                                  <defs>
-                                    <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                                      <stop offset="0%" stopColor="#667eea" stopOpacity={1} />
-                                      <stop offset="100%" stopColor="#764ba2" stopOpacity={1} />
-                                    </linearGradient>
-                                  </defs>
-                                </BarChart>
-                              </ResponsiveContainer>
+                              <div style={{ height: '300px' }}>
+                                <BarChartComponent data={storeChartData} title="Spending by Store" />
+                              </div>
                             </div>
                           )}
                         </div>
