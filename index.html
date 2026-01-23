@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grocery Expense Tracker</title>
+    <title>Grocery Receipt Scanner</title>
     
     <!-- Load React and ReactDOM from CDN -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -13,7 +13,7 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <!-- Load Recharts for charts -->
-    <script src="https://cdn.jsdelivr.net/npm/recharts@2.5.0/dist/Recharts.js" onload="console.log('Recharts loaded:', typeof Recharts)"></script>
+    <script src="https://cdn.jsdelivr.net/npm/recharts@2.5.0/dist/Recharts.js"></script>
     
     <!-- Load Google Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -35,326 +35,274 @@
 <body>
     <div id="root"></div>
     
-    <!-- Your React Application -->
     <script type="text/babel">
         const { useState, useEffect } = React;
-        
-        // Check if Recharts loaded, if not provide fallback
-        let BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer;
-        
-        if (typeof Recharts !== 'undefined') {
-          ({ BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts);
-        } else {
-          console.error('Recharts failed to load - charts will not display');
-          // Create dummy components so app still works
-          const DummyChart = () => <div style={{padding: '2rem', background: '#fee', borderRadius: '12px', textAlign: 'center'}}>Chart library not loaded. Please refresh the page.</div>;
-          BarChart = Bar = PieChart = Pie = Cell = LineChart = Line = XAxis = YAxis = CartesianGrid = Tooltip = Legend = ResponsiveContainer = DummyChart;
-        }
+        const { BarChart, Bar, PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } = Recharts;
 
-        // Simple icon components using Unicode symbols
+        // ==================== CONFIGURATION ====================
+        // TODO: Replace these with your actual values
+        const CONFIG = {
+          WORKER_URL: "https://yellow-bonus-b680.brweiss-123.workers.dev/", // e.g., https://receipt-scanner.yourname.workers.dev
+          SHEET_ID: "1PJBkbspO1wt_87RQF67VweCearDvb6ONVDIF8713o-g", // From your sheet URL
+          SHEET_NAME_DATA: "Data",
+          SHEET_NAME_FEEDBACK: "Feedback_Log"
+        };
+        // ======================================================
+
+        // Simple icon components
         const Icon = ({ children, size = 20 }) => (
           <span style={{ fontSize: `${size}px`, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
             {children}
           </span>
         );
 
-        const Camera = ({ size }) => <Icon size={size}>📷</Icon>;
         const Upload = ({ size }) => <Icon size={size}>⬆️</Icon>;
-        const DollarSign = ({ size }) => <Icon size={size}>💵</Icon>;
-        const ShoppingCart = ({ size }) => <Icon size={size}>🛒</Icon>;
-        const Calendar = ({ size }) => <Icon size={size}>📅</Icon>;
-        const Tag = ({ size }) => <Icon size={size}>🏷️</Icon>;
-        const Trash2 = ({ size }) => <Icon size={size}>🗑️</Icon>;
-        const Edit2 = ({ size }) => <Icon size={size}>✏️</Icon>;
-        const Save = ({ size }) => <Icon size={size}>💾</Icon>;
+        const Camera = ({ size }) => <Icon size={size}>📷</Icon>;
         const BarChart3 = ({ size }) => <Icon size={size}>📊</Icon>;
-        const Download = ({ size }) => <Icon size={size}>⬇️</Icon>;
-        const Settings = ({ size }) => <Icon size={size}>⚙️</Icon>;
+        const Tag = ({ size }) => <Icon size={size}>🏷️</Icon>;
+        const Sync = ({ size }) => <Icon size={size}>🔄</Icon>;
+        const Check = ({ size }) => <Icon size={size}>✅</Icon>;
+        const X = ({ size }) => <Icon size={size}>❌</Icon>;
+        const Edit = ({ size }) => <Icon size={size}>✏️</Icon>;
+        const Trash = ({ size }) => <Icon size={size}>🗑️</Icon>;
+        const Plus = ({ size }) => <Icon size={size}>➕</Icon>;
 
-        const GroceryExpenseTracker = () => {
-          const [receipts, setReceipts] = useState([]);
-          const [items, setItems] = useState([]);
-          const [view, setView] = useState('dashboard');
+        // Category definitions
+        const categories = {
+          'Produce': { color: '#10b981', icon: '🥬' },
+          'Dairy': { color: '#3b82f6', icon: '🥛' },
+          'Meat': { color: '#ef4444', icon: '🥩' },
+          'Bakery': { color: '#f59e0b', icon: '🍞' },
+          'Pantry': { color: '#8b5cf6', icon: '🥫' },
+          'Snacks': { color: '#ec4899', icon: '🍿' },
+          'Beverages': { color: '#06b6d4', icon: '🥤' },
+          'Frozen': { color: '#6366f1', icon: '🧊' },
+          'Other': { color: '#64748b', icon: '🛒' }
+        };
+
+        const GroceryScanner = () => {
+          // State management
+          const [view, setView] = useState('dashboard'); // dashboard | validation | byitem
           const [isProcessing, setIsProcessing] = useState(false);
-          const [editingItem, setEditingItem] = useState(null);
-          const [dateRange, setDateRange] = useState('all');
-          const [sortBy, setSortBy] = useState('date');
-          const [apiKey, setApiKey] = useState('');
-          const [tempApiKey, setTempApiKey] = useState('');
-          const [categoryFilter, setCategoryFilter] = useState('all');
+          const [isSyncing, setIsSyncing] = useState(false);
+          
+          // Validation state
+          const [validationData, setValidationData] = useState(null); // Holds receipt being validated
+          const [receiptImage, setReceiptImage] = useState(null); // Base64 image for preview
+          const [feedback, setFeedback] = useState('');
+          
+          // Data from Google Sheets
+          const [sheetData, setSheetData] = useState([]);
+          const [lastSync, setLastSync] = useState(null);
 
-          // Category definitions with colors
-          const categories = {
-            'Produce': { color: '#10b981', icon: '🥬' },
-            'Dairy': { color: '#3b82f6', icon: '🥛' },
-            'Meat': { color: '#ef4444', icon: '🥩' },
-            'Bakery': { color: '#f59e0b', icon: '🍞' },
-            'Pantry': { color: '#8b5cf6', icon: '🥫' },
-            'Snacks': { color: '#ec4899', icon: '🍿' },
-            'Beverages': { color: '#06b6d4', icon: '🥤' },
-            'Frozen': { color: '#6366f1', icon: '🧊' },
-            'Other': { color: '#64748b', icon: '🛒' }
-          };
-
-          // Load data from localStorage
+          // Load data from Google Sheets on mount
           useEffect(() => {
-            loadData();
+            loadFromSheet();
           }, []);
 
-          const loadData = () => {
+          // ==================== GOOGLE SHEETS FUNCTIONS ====================
+          
+          const getSheetURL = (sheetName, range = 'A:Z') => {
+            return `https://docs.google.com/spreadsheets/d/${CONFIG.SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}&range=${range}`;
+          };
+
+          const loadFromSheet = async () => {
+            setIsSyncing(true);
             try {
-              const receiptsData = localStorage.getItem('grocery-receipts');
-              const itemsData = localStorage.getItem('grocery-items');
-              const savedApiKey = localStorage.getItem('anthropic-api-key');
+              const response = await fetch(getSheetURL(CONFIG.SHEET_NAME_DATA));
+              const text = await response.text();
               
-              if (receiptsData) setReceipts(JSON.parse(receiptsData));
-              if (itemsData) setItems(JSON.parse(itemsData));
-              if (savedApiKey) {
-                setApiKey(savedApiKey);
-                setTempApiKey(savedApiKey);
-              }
+              // Google Sheets returns JSONP, need to extract JSON
+              const jsonText = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+              const data = JSON.parse(jsonText);
+              
+              // Parse rows (skip header row)
+              const rows = data.table.rows.slice(1);
+              const parsedData = rows.map(row => ({
+                date: row.c[0]?.v || '',
+                store: row.c[1]?.v || '',
+                name: row.c[2]?.v || '',
+                category: row.c[3]?.v || 'Other',
+                price: parseFloat(row.c[4]?.v || 0),
+                receiptId: row.c[5]?.v || '',
+                uploadTimestamp: row.c[6]?.v || ''
+              }));
+              
+              setSheetData(parsedData);
+              setLastSync(new Date());
+              console.log('Loaded', parsedData.length, 'items from Google Sheets');
             } catch (error) {
-              console.log('No existing data found, starting fresh');
+              console.error('Error loading from sheet:', error);
+              alert('Failed to load data from Google Sheets. Make sure the sheet is shared as "Anyone with link can view".');
+            } finally {
+              setIsSyncing(false);
             }
           };
 
-          const saveData = (newReceipts, newItems) => {
-            try {
-              localStorage.setItem('grocery-receipts', JSON.stringify(newReceipts));
-              localStorage.setItem('grocery-items', JSON.stringify(newItems));
-            } catch (error) {
-              console.error('Failed to save data:', error);
-            }
-          };
-
-          const saveApiKey = () => {
-            try {
-              localStorage.setItem('anthropic-api-key', tempApiKey);
-              setApiKey(tempApiKey);
-              alert('API key saved successfully! You can now upload receipts.');
-            } catch (error) {
-              console.error('Failed to save API key:', error);
-              alert('Failed to save API key. Please try again.');
-            }
-          };
-
-          const clearApiKey = () => {
-            if (confirm('Are you sure you want to remove your API key?')) {
-              localStorage.removeItem('anthropic-api-key');
-              setApiKey('');
-              setTempApiKey('');
-              alert('API key removed.');
-            }
-          };
-
-          // Process receipt image with Claude
-          const processReceiptImage = async (file) => {
-            // Check if API key is set
-            if (!apiKey) {
-              alert('Please set your Anthropic API key in Settings first!');
-              setView('settings');
-              return;
-            }
-
-            console.log('Step 1: Starting receipt processing...');
-            console.log('File:', file.name, file.type, file.size);
+          const saveToSheet = async () => {
+            if (!validationData) return;
+            
             setIsProcessing(true);
             
             try {
-              console.log('Step 2: Reading file as base64...');
+              const receiptId = Date.now().toString();
+              const timestamp = new Date().toISOString();
+              
+              // Prepare rows for Data sheet
+              const dataRows = validationData.items.map(item => [
+                item.date,
+                validationData.store,
+                item.name,
+                item.category,
+                item.price,
+                receiptId,
+                timestamp
+              ]);
+              
+              // Prepare row for Feedback_Log sheet (if feedback provided)
+              const feedbackRow = feedback.trim() ? [
+                receiptId,
+                timestamp,
+                validationData.store,
+                validationData.items.length,
+                feedback,
+                'FALSE' // Not corrected yet
+              ] : null;
+              
+              // Since Google Sheets API requires OAuth for write access,
+              // we'll use a simpler approach: generate CSV and show instructions
+              const dataCSV = dataRows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+              
+              console.log('Data to save:', dataCSV);
+              console.log('Feedback:', feedbackRow);
+              
+              // For now, we'll auto-copy to clipboard and show instructions
+              // In production, you'd use Google Sheets API with OAuth
+              
+              alert(`Ready to save! 
+
+For now, please manually paste this data:
+1. Open your Google Sheet "Data" tab
+2. Paste the data at the next empty row
+
+The data has been logged to console for copying.
+
+In the next version, we'll add automatic saving with OAuth.`);
+              
+              // Clear validation state
+              setValidationData(null);
+              setReceiptImage(null);
+              setFeedback('');
+              setView('dashboard');
+              
+              // Reload data
+              await loadFromSheet();
+              
+            } catch (error) {
+              console.error('Error saving to sheet:', error);
+              alert('Failed to save data. Please try again.');
+            } finally {
+              setIsProcessing(false);
+            }
+          };
+
+          // ==================== RECEIPT PROCESSING ====================
+          
+          const processReceiptImages = async (files) => {
+            if (CONFIG.WORKER_URL === "YOUR_CLOUDFLARE_WORKER_URL_HERE") {
+              alert('Please configure your Cloudflare Worker URL in the code!');
+              return;
+            }
+            
+            setIsProcessing(true);
+            
+            try {
+              // For now, process one file (we'll add multi-upload support after this works)
+              const file = files[0];
+              
+              // Convert to base64
               const base64Data = await new Promise((resolve, reject) => {
                 const reader = new FileReader();
-                reader.onload = () => {
-                  console.log('Step 2a: File read successfully');
-                  resolve(reader.result.split(',')[1]);
-                };
-                reader.onerror = () => {
-                  console.error('Step 2b: File read failed');
-                  reject(new Error('Failed to read file'));
-                };
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = reject;
                 reader.readAsDataURL(file);
               });
               
-              console.log('Step 3: Making API request through proxy...');
+              // Save image for preview
+              const reader2 = new FileReader();
+              reader2.onload = () => setReceiptImage(reader2.result);
+              reader2.readAsDataURL(file);
               
-              // IMPORTANT: Replace this URL with your Cloudflare Worker URL
-              // Example: https://grocery-proxy.yourname.workers.dev
-              const WORKER_URL = "https://yellow-bonus-b680.brweiss-123.workers.dev/";
-              
-              if (WORKER_URL === "YOUR_CLOUDFLARE_WORKER_URL_HERE") {
-                throw new Error('Please set up your Cloudflare Worker and update WORKER_URL in the code.\n\nSee CLOUDFLARE-SETUP.md for instructions.');
-              }
-
-              const response = await fetch(WORKER_URL, {
-                method: "POST",
+              // Call Cloudflare Worker
+              const response = await fetch(CONFIG.WORKER_URL, {
+                method: 'POST',
                 headers: {
-                  "Content-Type": "application/json"
+                  'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                  model: "claude-sonnet-4-20250514",
-                  max_tokens: 1000,
-                  messages: [
-                    {
-                      role: "user",
-                      content: [
-                        {
-                          type: "image",
-                          source: {
-                            type: "base64",
-                            media_type: file.type,
-                            data: base64Data
-                          }
-                        },
-                        {
-                          type: "text",
-                          text: `Analyze this grocery receipt and extract all items with their prices. Return ONLY a JSON object (no markdown, no preamble) with this structure:
-{
-  "store": "store name",
-  "date": "YYYY-MM-DD",
-  "items": [
-    {"name": "item name", "price": 0.00, "category": "Produce|Dairy|Meat|Bakery|Pantry|Snacks|Beverages|Frozen|Other"}
-  ],
-  "total": 0.00
-}
-
-Categorize each item appropriately. If you can't read something clearly, make your best guess.`
-                        }
-                      ]
-                    }
-                  ]
+                  image_data: base64Data,
+                  image_type: file.type
                 })
               });
               
-              console.log('Step 4: Got response, status:', response.status);
-
               if (!response.ok) {
-                const errorData = await response.json();
-                console.error('Step 4a: API error:', errorData);
-                throw new Error(errorData.error?.message || 'API request failed');
+                throw new Error('Failed to process receipt');
               }
-
-              console.log('Step 5: Parsing response...');
+              
               const data = await response.json();
               const text = data.content.map(item => item.text || "").join("\n");
-              const cleanText = text.replace(/\`\`\`json|\`\`\`/g, "").trim();
-              const receiptData = JSON.parse(cleanText);
+              const cleanText = text.replace(/```json|```/g, "").trim();
+              const extractedData = JSON.parse(cleanText);
               
-              console.log('Step 6: Parsed receipt data:', receiptData);
-
-              // Create receipt record
-              const newReceipt = {
-                id: Date.now().toString(),
-                ...receiptData,
-                uploadDate: new Date().toISOString()
-              };
-
-              // Add items with receipt reference
-              const newItems = receiptData.items.map(item => ({
-                id: `${newReceipt.id}-${Date.now()}-${Math.random()}`,
-                ...item,
-                receiptId: newReceipt.id,
-                store: receiptData.store,
-                date: receiptData.date
-              }));
-
-              const updatedReceipts = [...receipts, newReceipt];
-              const updatedItems = [...items, ...newItems];
+              // Set validation data and switch to validation view
+              setValidationData(extractedData);
+              setView('validation');
               
-              setReceipts(updatedReceipts);
-              setItems(updatedItems);
-              saveData(updatedReceipts, updatedItems);
-              
-              console.log('Step 7: Success! Added', newItems.length, 'items');
-              setIsProcessing(false);
-              setView('items');
             } catch (error) {
-              console.error('❌ Error at some step:', error);
-              console.error('Error name:', error.name);
-              console.error('Error message:', error.message);
-              console.error('Error stack:', error.stack);
-              
-              let userMessage = `Failed to process receipt: ${error.message}`;
-              
-              // Provide more helpful error messages
-              if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
-                userMessage = 'Network error: Cannot reach Anthropic API.\n\nThis might be caused by:\n• Browser blocking the request\n• Network/firewall restrictions\n• Ad blocker or privacy extension\n\nTry:\n• Disabling browser extensions\n• Using a different browser\n• Checking console for details (F12)';
-              }
-              
-              alert(userMessage);
+              console.error('Error processing receipt:', error);
+              alert(`Failed to process receipt: ${error.message}`);
+            } finally {
               setIsProcessing(false);
             }
           };
 
-          const handleFileUpload = async (event) => {
+          const handleFileUpload = (event) => {
             const files = Array.from(event.target.files);
-            if (files.length === 0) return;
-            
-            console.log(`Processing ${files.length} receipt(s)...`);
-            
-            for (let i = 0; i < files.length; i++) {
-              console.log(`Processing receipt ${i + 1} of ${files.length}`);
-              await processReceiptImage(files[i]);
-              
-              // Small delay between uploads to avoid rate limiting
-              if (i < files.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
+            if (files.length > 0) {
+              processReceiptImages(files);
             }
-            
-            alert(`Successfully processed ${files.length} receipt(s)!`);
           };
 
-          const deleteReceipt = (receiptId) => {
-            const updatedReceipts = receipts.filter(r => r.id !== receiptId);
-            const updatedItems = items.filter(i => i.receiptId !== receiptId);
-            setReceipts(updatedReceipts);
-            setItems(updatedItems);
-            saveData(updatedReceipts, updatedItems);
+          // ==================== VALIDATION FUNCTIONS ====================
+          
+          const updateValidationItem = (index, field, value) => {
+            const updated = { ...validationData };
+            updated.items[index][field] = field === 'price' ? parseFloat(value) : value;
+            setValidationData(updated);
           };
 
-          const deleteItem = (itemId) => {
-            const updatedItems = items.filter(i => i.id !== itemId);
-            setItems(updatedItems);
-            saveData(receipts, updatedItems);
+          const deleteValidationItem = (index) => {
+            const updated = { ...validationData };
+            updated.items.splice(index, 1);
+            setValidationData(updated);
           };
 
-          const updateItem = (itemId, updates) => {
-            const updatedItems = items.map(i => 
-              i.id === itemId ? { ...i, ...updates } : i
-            );
-            setItems(updatedItems);
-            saveData(receipts, updatedItems);
-            setEditingItem(null);
+          const addValidationItem = () => {
+            const updated = { ...validationData };
+            updated.items.push({
+              name: '',
+              category: 'Other',
+              price: 0,
+              date: validationData.date
+            });
+            setValidationData(updated);
           };
 
-          // Filter items by date range
-          const getFilteredItems = () => {
-            if (dateRange === 'all') return items;
-            
-            const now = new Date();
-            const cutoffDate = new Date();
-            
-            switch (dateRange) {
-              case '7days':
-                cutoffDate.setDate(now.getDate() - 7);
-                break;
-              case '30days':
-                cutoffDate.setDate(now.getDate() - 30);
-                break;
-              case '90days':
-                cutoffDate.setDate(now.getDate() - 90);
-                break;
-              default:
-                return items;
-            }
-            
-            return items.filter(item => new Date(item.date) >= cutoffDate);
-          };
-
-          // Calculate statistics
-          const filteredItems = getFilteredItems();
-          const totalSpent = filteredItems.reduce((sum, item) => sum + item.price, 0);
-          const categoryTotals = filteredItems.reduce((acc, item) => {
+          // ==================== DASHBOARD CALCULATIONS ====================
+          
+          const totalSpent = sheetData.reduce((sum, item) => sum + item.price, 0);
+          
+          const categoryTotals = sheetData.reduce((acc, item) => {
             acc[item.category] = (acc[item.category] || 0) + item.price;
             return acc;
           }, {});
@@ -365,54 +313,18 @@ Categorize each item appropriately. If you can't read something clearly, make yo
             color: categories[name]?.color || '#64748b'
           }));
 
-          // Store spending over time
-          const storeData = filteredItems.reduce((acc, item) => {
+          const storeTotals = sheetData.reduce((acc, item) => {
             acc[item.store] = (acc[item.store] || 0) + item.price;
             return acc;
           }, {});
 
-          const storeChartData = Object.entries(storeData).map(([name, value]) => ({
+          const storeChartData = Object.entries(storeTotals).map(([name, value]) => ({
             name,
             amount: parseFloat(value.toFixed(2))
           }));
 
-          // Monthly spending trend
-          const monthlyData = filteredItems.reduce((acc, item) => {
-            const month = item.date.substring(0, 7);
-            acc[month] = (acc[month] || 0) + item.price;
-            return acc;
-          }, {});
-
-          const trendData = Object.entries(monthlyData)
-            .sort()
-            .map(([month, amount]) => ({
-              month,
-              amount: parseFloat(amount.toFixed(2))
-            }));
-
-          const exportToCSV = () => {
-            const headers = ['Date', 'Store', 'Item', 'Category', 'Price'];
-            const rows = filteredItems.map(item => [
-              item.date,
-              item.store,
-              item.name,
-              item.category,
-              item.price.toFixed(2)
-            ]);
-            
-            const csv = [
-              headers.join(','),
-              ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-            ].join('\n');
-            
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `grocery-expenses-${new Date().toISOString().split('T')[0]}.csv`;
-            a.click();
-          };
-
+          // ==================== RENDER ====================
+          
           return (
             <div style={{
               minHeight: '100vh',
@@ -420,10 +332,8 @@ Categorize each item appropriately. If you can't read something clearly, make yo
               fontFamily: '"Plus Jakarta Sans", system-ui, sans-serif',
               padding: '2rem'
             }}>
-              <div style={{
-                maxWidth: '1400px',
-                margin: '0 auto'
-              }}>
+              <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+                
                 {/* Header */}
                 <div style={{
                   background: 'rgba(255, 255, 255, 0.95)',
@@ -448,18 +358,18 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                         WebkitTextFillColor: 'transparent',
                         margin: '0 0 0.5rem 0'
                       }}>
-                        Grocery Tracker
+                        Receipt Scanner
                       </h1>
                       <p style={{
                         margin: 0,
                         color: '#64748b',
                         fontSize: '1rem'
                       }}>
-                        Track expenses • Analyze spending • Save money
+                        Scan • Validate • Analyze
                       </p>
                     </div>
                     
-                    <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '1rem' }}>
                       <label style={{
                         background: isProcessing ? '#94a3b8' : 'linear-gradient(135deg, #667eea, #764ba2)',
                         color: 'white',
@@ -472,8 +382,7 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                         gap: '0.5rem',
                         border: 'none',
                         fontSize: '0.95rem',
-                        boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
-                        transition: 'all 0.3s ease'
+                        boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
                       }}>
                         <Upload size={20} />
                         {isProcessing ? 'Processing...' : 'Upload Receipt'}
@@ -488,619 +397,83 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                       </label>
                       
                       <button
-                        onClick={exportToCSV}
-                        disabled={filteredItems.length === 0}
+                        onClick={loadFromSheet}
+                        disabled={isSyncing}
                         style={{
                           background: 'white',
                           color: '#667eea',
                           border: '2px solid #667eea',
                           padding: '0.875rem 1.75rem',
                           borderRadius: '12px',
-                          cursor: filteredItems.length === 0 ? 'not-allowed' : 'pointer',
+                          cursor: isSyncing ? 'not-allowed' : 'pointer',
                           fontWeight: '600',
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.5rem',
-                          fontSize: '0.95rem',
-                          opacity: filteredItems.length === 0 ? 0.5 : 1,
-                          transition: 'all 0.3s ease'
+                          fontSize: '0.95rem'
                         }}
                       >
-                        <Download size={20} />
-                        Export CSV
+                        <Sync size={20} />
+                        {isSyncing ? 'Syncing...' : 'Sync from Sheet'}
                       </button>
                     </div>
                   </div>
+                  
+                  {lastSync && (
+                    <div style={{
+                      marginTop: '1rem',
+                      fontSize: '0.875rem',
+                      color: '#64748b'
+                    }}>
+                      Last synced: {lastSync.toLocaleTimeString()}
+                    </div>
+                  )}
                 </div>
 
-                {/* Navigation */}
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.95)',
-                  borderRadius: '16px',
-                  padding: '0.5rem',
-                  marginBottom: '2rem',
-                  display: 'flex',
-                  gap: '0.5rem',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                }}>
-                  {[
-                    { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
-                    { id: 'items', icon: ShoppingCart, label: 'Items' },
-                    { id: 'byitem', icon: Tag, label: 'By Item' },
-                    { id: 'receipts', icon: Camera, label: 'Receipts' },
-                    { id: 'settings', icon: Settings, label: 'Settings' }
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setView(tab.id)}
-                      style={{
-                        flex: 1,
-                        padding: '0.875rem',
-                        border: 'none',
-                        borderRadius: '12px',
-                        background: view === tab.id ? 'linear-gradient(135deg, #667eea, #764ba2)' : 'transparent',
-                        color: view === tab.id ? 'white' : '#64748b',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.5rem',
-                        transition: 'all 0.3s ease',
-                        fontSize: '0.95rem'
-                      }}
-                    >
-                      <tab.icon size={20} />
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Dashboard View */}
-                {view === 'dashboard' && (
-                  <div>
-                    {/* Date Range Filter */}
-                    <div style={{
-                      background: 'rgba(255, 255, 255, 0.95)',
-                      borderRadius: '16px',
-                      padding: '1.5rem',
-                      marginBottom: '2rem',
-                      boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                    }}>
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '0.75rem',
-                        fontWeight: '600',
-                        color: '#334155',
-                        fontSize: '0.95rem'
-                      }}>
-                        Time Period
-                      </label>
-                      <select
-                        value={dateRange}
-                        onChange={(e) => setDateRange(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '0.875rem',
-                          borderRadius: '12px',
-                          border: '2px solid #e2e8f0',
-                          fontSize: '0.95rem',
-                          fontWeight: '500',
-                          cursor: 'pointer',
-                          background: 'white'
-                        }}
-                      >
-                        <option value="all">All Time</option>
-                        <option value="7days">Last 7 Days</option>
-                        <option value="30days">Last 30 Days</option>
-                        <option value="90days">Last 90 Days</option>
-                      </select>
-                    </div>
-
-                    {/* Summary Cards */}
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                      gap: '1.5rem',
-                      marginBottom: '2rem'
-                    }}>
-                      <div style={{
-                        background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                        borderRadius: '20px',
-                        padding: '2rem',
-                        color: 'white',
-                        boxShadow: '0 12px 32px rgba(102, 126, 234, 0.3)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-                          <div style={{
-                            background: 'rgba(255, 255, 255, 0.2)',
-                            borderRadius: '12px',
-                            padding: '0.75rem',
-                            display: 'flex'
-                          }}>
-                            <DollarSign size={24} />
-                          </div>
-                          <div style={{ fontSize: '0.95rem', fontWeight: '500', opacity: 0.9 }}>Total Spent</div>
-                        </div>
-                        <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>${totalSpent.toFixed(2)}</div>
-                        <div style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.5rem' }}>
-                          {filteredItems.length} items tracked
-                        </div>
-                      </div>
-
-                      <div style={{
-                        background: 'white',
-                        borderRadius: '20px',
-                        padding: '2rem',
-                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-                          <div style={{
-                            background: 'linear-gradient(135deg, #10b981, #059669)',
-                            borderRadius: '12px',
-                            padding: '0.75rem',
-                            display: 'flex',
-                            color: 'white'
-                          }}>
-                            <ShoppingCart size={24} />
-                          </div>
-                          <div style={{ fontSize: '0.95rem', fontWeight: '600', color: '#64748b' }}>Receipts</div>
-                        </div>
-                        <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#334155' }}>
-                          {receipts.length}
-                        </div>
-                        <div style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.5rem' }}>
-                          Total uploaded
-                        </div>
-                      </div>
-
-                      <div style={{
-                        background: 'white',
-                        borderRadius: '20px',
-                        padding: '2rem',
-                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-                          <div style={{
-                            background: 'linear-gradient(135deg, #f59e0b, #d97706)',
-                            borderRadius: '12px',
-                            padding: '0.75rem',
-                            display: 'flex',
-                            color: 'white'
-                          }}>
-                            <Tag size={24} />
-                          </div>
-                          <div style={{ fontSize: '0.95rem', fontWeight: '600', color: '#64748b' }}>Categories</div>
-                        </div>
-                        <div style={{ fontSize: '2.5rem', fontWeight: '800', color: '#334155' }}>
-                          {Object.keys(categoryTotals).length}
-                        </div>
-                        <div style={{ fontSize: '0.875rem', color: '#64748b', marginTop: '0.5rem' }}>
-                          Active categories
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Charts */}
-                    {filteredItems.length > 0 ? (
-                      <>
-                        <div style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))',
-                          gap: '2rem',
-                          marginBottom: '2rem'
-                        }}>
-                          {/* Category Breakdown */}
-                          <div style={{
-                            background: 'white',
-                            borderRadius: '20px',
-                            padding: '2rem',
-                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                          }}>
-                            <h3 style={{
-                              margin: '0 0 1.5rem 0',
-                              fontSize: '1.25rem',
-                              fontWeight: '700',
-                              color: '#334155'
-                            }}>Spending by Category</h3>
-                            <ResponsiveContainer width="100%" height={300}>
-                              <PieChart>
-                                <Pie
-                                  data={categoryData}
-                                  cx="50%"
-                                  cy="50%"
-                                  labelLine={false}
-                                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                                  outerRadius={100}
-                                  fill="#8884d8"
-                                  dataKey="value"
-                                >
-                                  {categoryData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                  ))}
-                                </Pie>
-                                <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                              </PieChart>
-                            </ResponsiveContainer>
-                          </div>
-
-                          {/* Category Breakdown - Stacked Bar */}
-                          <div style={{
-                            background: 'white',
-                            borderRadius: '20px',
-                            padding: '2rem',
-                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                          }}>
-                            <h3 style={{
-                              margin: '0 0 1.5rem 0',
-                              fontSize: '1.25rem',
-                              fontWeight: '700',
-                              color: '#334155'
-                            }}>Categories by Store</h3>
-                            <ResponsiveContainer width="100%" height={300}>
-                              <BarChart data={(() => {
-                                // Build stacked data: one row per store, columns for each category
-                                const storeCategories = {};
-                                filteredItems.forEach(item => {
-                                  if (!storeCategories[item.store]) {
-                                    storeCategories[item.store] = { name: item.store };
-                                  }
-                                  const cat = item.category;
-                                  storeCategories[item.store][cat] = (storeCategories[item.store][cat] || 0) + item.price;
-                                });
-                                return Object.values(storeCategories);
-                              })()}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                <XAxis dataKey="name" stroke="#64748b" />
-                                <YAxis stroke="#64748b" />
-                                <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                                <Legend />
-                                {Object.keys(categories).map(cat => (
-                                  <Bar 
-                                    key={cat} 
-                                    dataKey={cat} 
-                                    stackId="a" 
-                                    fill={categories[cat].color}
-                                    radius={[0, 0, 0, 0]}
-                                  />
-                                ))}
-                              </BarChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-
-                        {/* Store Spending - Total */}
-                        <div style={{
-                          background: 'white',
-                          borderRadius: '20px',
-                          padding: '2rem',
-                          marginBottom: '2rem',
-                          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                        }}>
-                          <h3 style={{
-                            margin: '0 0 1.5rem 0',
-                            fontSize: '1.25rem',
-                            fontWeight: '700',
-                            color: '#334155'
-                          }}>Total Spending by Store</h3>
-                          <ResponsiveContainer width="100%" height={300}>
-                            <BarChart data={storeChartData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                              <XAxis dataKey="name" stroke="#64748b" />
-                              <YAxis stroke="#64748b" />
-                              <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                              <Bar dataKey="amount" fill="url(#colorGradient)" radius={[8, 8, 0, 0]} />
-                              <defs>
-                                <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="0%" stopColor="#667eea" stopOpacity={1} />
-                                  <stop offset="100%" stopColor="#764ba2" stopOpacity={1} />
-                                </linearGradient>
-                              </defs>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-
-                        {/* Spending Trend */}
-                        {trendData.length > 1 && (
-                          <div style={{
-                            background: 'white',
-                            borderRadius: '20px',
-                            padding: '2rem',
-                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                          }}>
-                            <h3 style={{
-                              margin: '0 0 1.5rem 0',
-                              fontSize: '1.25rem',
-                              fontWeight: '700',
-                              color: '#334155'
-                            }}>Spending Trend</h3>
-                            <ResponsiveContainer width="100%" height={300}>
-                              <LineChart data={trendData}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                <XAxis dataKey="month" stroke="#64748b" />
-                                <YAxis stroke="#64748b" />
-                                <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                                <Line
-                                  type="monotone"
-                                  dataKey="amount"
-                                  stroke="#667eea"
-                                  strokeWidth={3}
-                                  dot={{ fill: '#667eea', r: 5 }}
-                                />
-                              </LineChart>
-                            </ResponsiveContainer>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div style={{
-                        background: 'white',
-                        borderRadius: '20px',
-                        padding: '4rem 2rem',
-                        textAlign: 'center',
-                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
-                      }}>
-                        <Camera size={64} style={{ color: '#cbd5e1', margin: '0 auto 1rem' }} />
-                        <h3 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#334155', marginBottom: '0.5rem' }}>
-                          No Data Yet
-                        </h3>
-                        <p style={{ color: '#64748b', marginBottom: '2rem' }}>
-                          Upload your first receipt to start tracking expenses
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Items View */}
-                {view === 'items' && (
+                {/* Navigation - Only show when not validating */}
+                {view !== 'validation' && (
                   <div style={{
-                    background: 'white',
-                    borderRadius: '20px',
-                    padding: '2rem',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    borderRadius: '16px',
+                    padding: '0.5rem',
+                    marginBottom: '2rem',
+                    display: 'flex',
+                    gap: '0.5rem',
                     boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
                   }}>
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      marginBottom: '1.5rem',
-                      flexWrap: 'wrap',
-                      gap: '1rem'
-                    }}>
-                      <h2 style={{
-                        margin: 0,
-                        fontSize: '1.5rem',
-                        fontWeight: '700',
-                        color: '#334155'
-                      }}>All Items ({filteredItems.filter(item => categoryFilter === 'all' || item.category === categoryFilter).length})</h2>
-                      
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <label style={{ fontWeight: '600', color: '#64748b', fontSize: '0.9rem' }}>
-                          Filter by:
-                        </label>
-                        <select
-                          value={categoryFilter}
-                          onChange={(e) => setCategoryFilter(e.target.value)}
-                          style={{
-                            padding: '0.625rem 1rem',
-                            borderRadius: '10px',
-                            border: '2px solid #e2e8f0',
-                            fontSize: '0.9rem',
-                            fontWeight: '500',
-                            cursor: 'pointer',
-                            background: 'white',
-                            color: '#334155'
-                          }}
-                        >
-                          <option value="all">All Categories</option>
-                          {Object.keys(categories).map(cat => (
-                            <option key={cat} value={cat}>
-                              {categories[cat].icon} {cat}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    
-                    {(() => {
-                      const displayItems = filteredItems.filter(item => 
-                        categoryFilter === 'all' || item.category === categoryFilter
-                      );
-                      
-                      return displayItems.length > 0 ? (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
-                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Date</th>
-                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Store</th>
-                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Item</th>
-                              <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Category</th>
-                              <th 
-                                style={{ 
-                                  padding: '1rem', 
-                                  textAlign: 'right', 
-                                  fontWeight: '600', 
-                                  color: '#64748b',
-                                  cursor: 'pointer',
-                                  userSelect: 'none'
-                                }}
-                                onClick={() => setSortBy(sortBy === 'price' ? 'date' : 'price')}
-                              >
-                                Price {sortBy === 'price' ? '▼' : ''}
-                              </th>
-                              <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#64748b' }}>Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {displayItems.sort((a, b) => {
-                              if (sortBy === 'price') {
-                                return b.price - a.price; // Descending by price
-                              }
-                              return new Date(b.date) - new Date(a.date); // Descending by date
-                            }).map(item => (
-                              <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                {editingItem === item.id ? (
-                                  <>
-                                    <td style={{ padding: '1rem' }}>
-                                      <input
-                                        type="date"
-                                        defaultValue={item.date}
-                                        onBlur={(e) => updateItem(item.id, { date: e.target.value })}
-                                        style={{
-                                          padding: '0.5rem',
-                                          borderRadius: '8px',
-                                          border: '1px solid #e2e8f0',
-                                          width: '100%'
-                                        }}
-                                      />
-                                    </td>
-                                    <td style={{ padding: '1rem' }}>
-                                      <input
-                                        type="text"
-                                        defaultValue={item.store}
-                                        onBlur={(e) => updateItem(item.id, { store: e.target.value })}
-                                        style={{
-                                          padding: '0.5rem',
-                                          borderRadius: '8px',
-                                          border: '1px solid #e2e8f0',
-                                          width: '100%'
-                                        }}
-                                      />
-                                    </td>
-                                    <td style={{ padding: '1rem' }}>
-                                      <input
-                                        type="text"
-                                        defaultValue={item.name}
-                                        onBlur={(e) => updateItem(item.id, { name: e.target.value })}
-                                        style={{
-                                          padding: '0.5rem',
-                                          borderRadius: '8px',
-                                          border: '1px solid #e2e8f0',
-                                          width: '100%'
-                                        }}
-                                      />
-                                    </td>
-                                    <td style={{ padding: '1rem' }}>
-                                      <select
-                                        defaultValue={item.category}
-                                        onChange={(e) => updateItem(item.id, { category: e.target.value })}
-                                        style={{
-                                          padding: '0.5rem',
-                                          borderRadius: '8px',
-                                          border: '1px solid #e2e8f0',
-                                          width: '100%'
-                                        }}
-                                      >
-                                        {Object.keys(categories).map(cat => (
-                                          <option key={cat} value={cat}>{cat}</option>
-                                        ))}
-                                      </select>
-                                    </td>
-                                    <td style={{ padding: '1rem', textAlign: 'right' }}>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        defaultValue={item.price}
-                                        onBlur={(e) => updateItem(item.id, { price: parseFloat(e.target.value) })}
-                                        style={{
-                                          padding: '0.5rem',
-                                          borderRadius: '8px',
-                                          border: '1px solid #e2e8f0',
-                                          width: '100%',
-                                          textAlign: 'right'
-                                        }}
-                                      />
-                                    </td>
-                                    <td style={{ padding: '1rem', textAlign: 'right' }}>
-                                      <button
-                                        onClick={() => setEditingItem(null)}
-                                        style={{
-                                          background: '#10b981',
-                                          color: 'white',
-                                          border: 'none',
-                                          borderRadius: '8px',
-                                          padding: '0.5rem',
-                                          cursor: 'pointer'
-                                        }}
-                                      >
-                                        <Save size={16} />
-                                      </button>
-                                    </td>
-                                  </>
-                                ) : (
-                                  <>
-                                    <td style={{ padding: '1rem', color: '#334155' }}>{item.date}</td>
-                                    <td style={{ padding: '1rem', color: '#334155' }}>{item.store}</td>
-                                    <td style={{ padding: '1rem', color: '#334155', fontWeight: '500' }}>{item.name}</td>
-                                    <td style={{ padding: '1rem' }}>
-                                      <span style={{
-                                        background: `${categories[item.category]?.color}15`,
-                                        color: categories[item.category]?.color,
-                                        padding: '0.375rem 0.75rem',
-                                        borderRadius: '8px',
-                                        fontSize: '0.875rem',
-                                        fontWeight: '600',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.25rem'
-                                      }}>
-                                        {categories[item.category]?.icon} {item.category}
-                                      </span>
-                                    </td>
-                                    <td style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#334155' }}>
-                                      ${item.price.toFixed(2)}
-                                    </td>
-                                    <td style={{ padding: '1rem', textAlign: 'right' }}>
-                                      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                                        <button
-                                          onClick={() => setEditingItem(item.id)}
-                                          style={{
-                                            background: '#667eea',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            padding: '0.5rem',
-                                            cursor: 'pointer'
-                                          }}
-                                        >
-                                          <Edit2 size={16} />
-                                        </button>
-                                        <button
-                                          onClick={() => deleteItem(item.id)}
-                                          style={{
-                                            background: '#ef4444',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            padding: '0.5rem',
-                                            cursor: 'pointer'
-                                          }}
-                                        >
-                                          <Trash2 size={16} />
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </>
-                                )}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                        <ShoppingCart size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                        <p>No items found{categoryFilter !== 'all' ? ` in ${categoryFilter} category` : ''}. {categoryFilter !== 'all' ? 'Try a different category or upload more receipts!' : 'Upload a receipt to get started!'}</p>
-                      </div>
-                    );
-                    })()}
+                    {[
+                      { id: 'dashboard', icon: BarChart3, label: 'Dashboard' },
+                      { id: 'byitem', icon: Tag, label: 'By Item' }
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setView(tab.id)}
+                        style={{
+                          flex: 1,
+                          padding: '0.875rem',
+                          border: 'none',
+                          borderRadius: '12px',
+                          background: view === tab.id ? 'linear-gradient(135deg, #667eea, #764ba2)' : 'transparent',
+                          color: view === tab.id ? 'white' : '#64748b',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.5rem',
+                          transition: 'all 0.3s ease',
+                          fontSize: '0.95rem'
+                        }}
+                      >
+                        <tab.icon size={20} />
+                        {tab.label}
+                      </button>
+                    ))}
                   </div>
                 )}
 
-                {/* Receipts View */}
-                {view === 'receipts' && (
+                {/* VALIDATION VIEW */}
+                {view === 'validation' && validationData && (
                   <div style={{
                     background: 'white',
                     borderRadius: '20px',
@@ -1112,107 +485,356 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                       fontSize: '1.5rem',
                       fontWeight: '700',
                       color: '#334155'
-                    }}>Receipts ({receipts.length})</h2>
+                    }}>Validate Receipt</h2>
                     
-                    {receipts.length > 0 ? (
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-                        gap: '1.5rem'
-                      }}>
-                        {receipts.sort((a, b) => new Date(b.date) - new Date(a.date)).map(receipt => (
-                          <div
-                            key={receipt.id}
+                    <div style={{ display: 'flex', gap: '2rem' }}>
+                      {/* Left: Receipt Image */}
+                      <div style={{ flex: '0 0 40%' }}>
+                        {receiptImage && (
+                          <img
+                            src={receiptImage}
+                            alt="Receipt"
                             style={{
-                              border: '2px solid #e2e8f0',
-                              borderRadius: '16px',
-                              padding: '1.5rem',
-                              transition: 'all 0.3s ease',
-                              cursor: 'pointer'
+                              width: '100%',
+                              borderRadius: '12px',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
                             }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.borderColor = '#667eea';
-                              e.currentTarget.style.boxShadow = '0 8px 24px rgba(102, 126, 234, 0.15)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.borderColor = '#e2e8f0';
-                              e.currentTarget.style.boxShadow = 'none';
+                          />
+                        )}
+                      </div>
+                      
+                      {/* Right: Editable Table + Feedback */}
+                      <div style={{ flex: 1 }}>
+                        <div style={{
+                          background: '#f8fafc',
+                          borderRadius: '12px',
+                          padding: '1.5rem',
+                          marginBottom: '1.5rem'
+                        }}>
+                          <div style={{ marginBottom: '1rem' }}>
+                            <strong>Store:</strong> {validationData.store} • <strong>Date:</strong> {validationData.date}
+                          </div>
+                          
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                                <th style={{ padding: '0.5rem', textAlign: 'left', fontSize: '0.875rem' }}>Item</th>
+                                <th style={{ padding: '0.5rem', textAlign: 'left', fontSize: '0.875rem' }}>Category</th>
+                                <th style={{ padding: '0.5rem', textAlign: 'right', fontSize: '0.875rem' }}>Price</th>
+                                <th style={{ padding: '0.5rem', width: '60px' }}></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {validationData.items.map((item, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '0.5rem' }}>
+                                    <input
+                                      type="text"
+                                      value={item.name}
+                                      onChange={(e) => updateValidationItem(idx, 'name', e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        padding: '0.5rem',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '6px',
+                                        fontSize: '0.875rem'
+                                      }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '0.5rem' }}>
+                                    <select
+                                      value={item.category}
+                                      onChange={(e) => updateValidationItem(idx, 'category', e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        padding: '0.5rem',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '6px',
+                                        fontSize: '0.875rem'
+                                      }}
+                                    >
+                                      {Object.keys(categories).map(cat => (
+                                        <option key={cat} value={cat}>{categories[cat].icon} {cat}</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                  <td style={{ padding: '0.5rem' }}>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={item.price}
+                                      onChange={(e) => updateValidationItem(idx, 'price', e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        padding: '0.5rem',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '6px',
+                                        fontSize: '0.875rem',
+                                        textAlign: 'right'
+                                      }}
+                                    />
+                                  </td>
+                                  <td style={{ padding: '0.5rem', textAlign: 'center' }}>
+                                    <button
+                                      onClick={() => deleteValidationItem(idx)}
+                                      style={{
+                                        background: '#fee2e2',
+                                        color: '#dc2626',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        padding: '0.5rem',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      <Trash size={16} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          
+                          <button
+                            onClick={addValidationItem}
+                            style={{
+                              marginTop: '1rem',
+                              background: '#f0fdf4',
+                              color: '#16a34a',
+                              border: '1px solid #16a34a',
+                              padding: '0.5rem 1rem',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              fontWeight: '600',
+                              fontSize: '0.875rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem'
                             }}
                           >
-                            <div style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'start',
-                              marginBottom: '1rem'
-                            }}>
-                              <div>
-                                <h3 style={{
-                                  margin: '0 0 0.5rem 0',
-                                  fontSize: '1.25rem',
-                                  fontWeight: '700',
-                                  color: '#334155'
-                                }}>{receipt.store}</h3>
-                                <p style={{
-                                  margin: 0,
-                                  color: '#64748b',
-                                  fontSize: '0.875rem',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '0.5rem'
-                                }}>
-                                  <Calendar size={14} />
-                                  {receipt.date}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => deleteReceipt(receipt.id)}
-                                style={{
-                                  background: '#fee2e2',
-                                  color: '#ef4444',
-                                  border: 'none',
-                                  borderRadius: '8px',
-                                  padding: '0.5rem',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                            
-                            <div style={{
-                              background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                              borderRadius: '12px',
-                              padding: '1.5rem',
-                              color: 'white',
-                              marginBottom: '1rem'
-                            }}>
-                              <div style={{ fontSize: '0.875rem', opacity: 0.9, marginBottom: '0.25rem' }}>
-                                Total Amount
-                              </div>
-                              <div style={{ fontSize: '2rem', fontWeight: '800' }}>
-                                ${receipt.total.toFixed(2)}
-                              </div>
-                            </div>
-                            
-                            <div style={{
+                            <Plus size={16} /> Add Item
+                          </button>
+                        </div>
+                        
+                        {/* Feedback Section */}
+                        <div style={{
+                          background: '#eff6ff',
+                          borderRadius: '12px',
+                          padding: '1.5rem',
+                          marginBottom: '1.5rem'
+                        }}>
+                          <label style={{
+                            display: 'block',
+                            fontWeight: '600',
+                            color: '#1e40af',
+                            marginBottom: '0.75rem',
+                            fontSize: '0.95rem'
+                          }}>
+                            💬 Feedback (Optional)
+                          </label>
+                          <p style={{
+                            fontSize: '0.875rem',
+                            color: '#3b82f6',
+                            marginBottom: '0.75rem'
+                          }}>
+                            What did the AI get wrong? Your feedback helps improve future extractions.
+                          </p>
+                          <textarea
+                            value={feedback}
+                            onChange={(e) => setFeedback(e.target.value)}
+                            placeholder="Example: Discount lines were treated as items, or 'eggs' was misread as 'eggz'"
+                            style={{
+                              width: '100%',
+                              minHeight: '80px',
+                              padding: '0.75rem',
+                              border: '2px solid #dbeafe',
+                              borderRadius: '8px',
+                              fontSize: '0.875rem',
+                              fontFamily: 'inherit',
+                              resize: 'vertical'
+                            }}
+                          />
+                        </div>
+                        
+                        {/* Action Buttons */}
+                        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                          <button
+                            onClick={() => {
+                              setValidationData(null);
+                              setReceiptImage(null);
+                              setFeedback('');
+                              setView('dashboard');
+                            }}
+                            style={{
+                              background: 'white',
                               color: '#64748b',
-                              fontSize: '0.875rem'
-                            }}>
-                              {receipt.items.length} items
-                            </div>
-                          </div>
-                        ))}
+                              border: '2px solid #e2e8f0',
+                              padding: '0.875rem 1.75rem',
+                              borderRadius: '12px',
+                              cursor: 'pointer',
+                              fontWeight: '600',
+                              fontSize: '0.95rem'
+                            }}
+                          >
+                            <X size={18} /> Cancel
+                          </button>
+                          
+                          <button
+                            onClick={saveToSheet}
+                            disabled={isProcessing}
+                            style={{
+                              background: isProcessing ? '#94a3b8' : 'linear-gradient(135deg, #10b981, #059669)',
+                              color: 'white',
+                              border: 'none',
+                              padding: '0.875rem 2rem',
+                              borderRadius: '12px',
+                              cursor: isProcessing ? 'not-allowed' : 'pointer',
+                              fontWeight: '600',
+                              fontSize: '0.95rem',
+                              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem'
+                            }}
+                          >
+                            <Check size={18} /> Save to Google Sheet
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* DASHBOARD VIEW */}
+                {view === 'dashboard' && (
+                  <div>
+                    {sheetData.length === 0 ? (
+                      <div style={{
+                        background: 'white',
+                        borderRadius: '20px',
+                        padding: '4rem 2rem',
+                        textAlign: 'center',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                      }}>
+                        <Camera size={64} style={{ color: '#cbd5e1', margin: '0 auto 1.5rem' }} />
+                        <h3 style={{
+                          fontSize: '1.5rem',
+                          fontWeight: '700',
+                          color: '#334155',
+                          marginBottom: '0.5rem'
+                        }}>
+                          No Data Yet
+                        </h3>
+                        <p style={{ color: '#64748b', marginBottom: '2rem' }}>
+                          Upload your first receipt to get started!
+                        </p>
                       </div>
                     ) : (
-                      <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
-                        <Camera size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                        <p>No receipts uploaded yet. Click "Upload Receipt" to get started!</p>
-                      </div>
+                      <>
+                        {/* Summary Cards */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                          gap: '1.5rem',
+                          marginBottom: '2rem'
+                        }}>
+                          <div style={{
+                            background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                            borderRadius: '20px',
+                            padding: '2rem',
+                            color: 'white',
+                            boxShadow: '0 12px 32px rgba(102, 126, 234, 0.3)'
+                          }}>
+                            <div style={{ fontSize: '0.95rem', opacity: 0.9, marginBottom: '0.5rem' }}>
+                              Total Spent
+                            </div>
+                            <div style={{ fontSize: '2.5rem', fontWeight: '800' }}>
+                              ${totalSpent.toFixed(2)}
+                            </div>
+                            <div style={{ fontSize: '0.875rem', opacity: 0.8, marginTop: '0.5rem' }}>
+                              {sheetData.length} items tracked
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Charts */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))',
+                          gap: '2rem'
+                        }}>
+                          {/* Category Pie Chart */}
+                          {categoryData.length > 0 && (
+                            <div style={{
+                              background: 'white',
+                              borderRadius: '20px',
+                              padding: '2rem',
+                              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                            }}>
+                              <h3 style={{
+                                margin: '0 0 1.5rem 0',
+                                fontSize: '1.25rem',
+                                fontWeight: '700',
+                                color: '#334155'
+                              }}>Spending by Category</h3>
+                              <ResponsiveContainer width="100%" height={300}>
+                                <PieChart>
+                                  <Pie
+                                    data={categoryData}
+                                    cx="50%"
+                                    cy="50%"
+                                    labelLine={false}
+                                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                                    outerRadius={100}
+                                    dataKey="value"
+                                  >
+                                    {categoryData.map((entry, index) => (
+                                      <Cell key={`cell-${index}`} fill={entry.color} />
+                                    ))}
+                                  </Pie>
+                                  <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+                                </PieChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+
+                          {/* Store Bar Chart */}
+                          {storeChartData.length > 0 && (
+                            <div style={{
+                              background: 'white',
+                              borderRadius: '20px',
+                              padding: '2rem',
+                              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)'
+                            }}>
+                              <h3 style={{
+                                margin: '0 0 1.5rem 0',
+                                fontSize: '1.25rem',
+                                fontWeight: '700',
+                                color: '#334155'
+                              }}>Spending by Store</h3>
+                              <ResponsiveContainer width="100%" height={300}>
+                                <BarChart data={storeChartData}>
+                                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                  <XAxis dataKey="name" stroke="#64748b" />
+                                  <YAxis stroke="#64748b" />
+                                  <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+                                  <Bar dataKey="amount" fill="url(#colorGradient)" radius={[8, 8, 0, 0]} />
+                                  <defs>
+                                    <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="0%" stopColor="#667eea" stopOpacity={1} />
+                                      <stop offset="100%" stopColor="#764ba2" stopOpacity={1} />
+                                    </linearGradient>
+                                  </defs>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
 
-                {/* By Item View - Grouped */}
+                {/* BY ITEM VIEW */}
                 {view === 'byitem' && (
                   <div style={{
                     background: 'white',
@@ -1228,8 +850,8 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                     }}>Spending by Item</h2>
                     
                     {(() => {
-                      // Group items by name (case-insensitive, trimmed)
-                      const grouped = filteredItems.reduce((acc, item) => {
+                      // Group items
+                      const grouped = sheetData.reduce((acc, item) => {
                         const key = item.name.toLowerCase().trim();
                         if (!acc[key]) {
                           acc[key] = {
@@ -1237,7 +859,6 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                             category: item.category,
                             totalSpent: 0,
                             count: 0,
-                            avgPrice: 0,
                             purchases: []
                           };
                         }
@@ -1251,14 +872,12 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                         return acc;
                       }, {});
                       
-                      // Convert to array and calculate averages
-                      const groupedArray = Object.values(grouped).map(item => ({
-                        ...item,
-                        avgPrice: item.totalSpent / item.count
-                      }));
-                      
-                      // Sort by total spent (descending)
-                      groupedArray.sort((a, b) => b.totalSpent - a.totalSpent);
+                      const groupedArray = Object.values(grouped)
+                        .map(item => ({
+                          ...item,
+                          avgPrice: item.totalSpent / item.count
+                        }))
+                        .sort((a, b) => b.totalSpent - a.totalSpent);
                       
                       return groupedArray.length > 0 ? (
                         <div style={{ overflowX: 'auto' }}>
@@ -1268,27 +887,15 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                                 <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Item</th>
                                 <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', color: '#64748b' }}>Category</th>
                                 <th style={{ padding: '1rem', textAlign: 'center', fontWeight: '600', color: '#64748b' }}>Purchases</th>
-                                <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#64748b' }}>Total Spent</th>
+                                <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#64748b' }}>Total</th>
                                 <th style={{ padding: '1rem', textAlign: 'right', fontWeight: '600', color: '#64748b' }}>Avg Price</th>
                               </tr>
                             </thead>
                             <tbody>
                               {groupedArray.map((item, idx) => (
                                 <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                  <td style={{ padding: '1rem', color: '#334155', fontWeight: '500' }}>
+                                  <td style={{ padding: '1rem', fontWeight: '500', color: '#334155' }}>
                                     {item.name}
-                                    <details style={{ marginTop: '0.5rem' }}>
-                                      <summary style={{ cursor: 'pointer', fontSize: '0.875rem', color: '#667eea' }}>
-                                        View {item.count} purchase{item.count > 1 ? 's' : ''}
-                                      </summary>
-                                      <div style={{ marginTop: '0.5rem', paddingLeft: '1rem' }}>
-                                        {item.purchases.sort((a, b) => new Date(b.date) - new Date(a.date)).map((purchase, i) => (
-                                          <div key={i} style={{ fontSize: '0.875rem', color: '#64748b', padding: '0.25rem 0' }}>
-                                            {purchase.date} • {purchase.store} • ${purchase.price.toFixed(2)}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </details>
                                   </td>
                                   <td style={{ padding: '1rem' }}>
                                     <span style={{
@@ -1297,15 +904,12 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                                       padding: '0.375rem 0.75rem',
                                       borderRadius: '8px',
                                       fontSize: '0.875rem',
-                                      fontWeight: '600',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '0.25rem'
+                                      fontWeight: '600'
                                     }}>
                                       {categories[item.category]?.icon} {item.category}
                                     </span>
                                   </td>
-                                  <td style={{ padding: '1rem', textAlign: 'center', color: '#334155', fontWeight: '600' }}>
+                                  <td style={{ padding: '1rem', textAlign: 'center', fontWeight: '600', color: '#334155' }}>
                                     {item.count}x
                                   </td>
                                   <td style={{ padding: '1rem', textAlign: 'right', fontWeight: '700', color: '#667eea', fontSize: '1.1rem' }}>
@@ -1322,274 +926,10 @@ Categorize each item appropriately. If you can't read something clearly, make yo
                       ) : (
                         <div style={{ textAlign: 'center', padding: '3rem', color: '#64748b' }}>
                           <Tag size={48} style={{ margin: '0 auto 1rem', opacity: 0.3 }} />
-                          <p>No items to group yet. Upload receipts to get started!</p>
+                          <p>No items yet. Upload receipts to get started!</p>
                         </div>
                       );
                     })()}
-                  </div>
-                )}
-
-                {/* Settings View */}
-                {view === 'settings' && (
-                  <div style={{
-                    background: 'white',
-                    borderRadius: '20px',
-                    padding: '2rem',
-                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.1)',
-                    maxWidth: '800px',
-                    margin: '0 auto'
-                  }}>
-                    <h2 style={{
-                      margin: '0 0 1.5rem 0',
-                      fontSize: '1.5rem',
-                      fontWeight: '700',
-                      color: '#334155'
-                    }}>Settings</h2>
-
-                    {/* API Key Section */}
-                    <div style={{
-                      background: '#f8fafc',
-                      borderRadius: '16px',
-                      padding: '2rem',
-                      marginBottom: '2rem'
-                    }}>
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.75rem',
-                        marginBottom: '1rem'
-                      }}>
-                        <div style={{
-                          background: 'linear-gradient(135deg, #667eea, #764ba2)',
-                          borderRadius: '10px',
-                          padding: '0.5rem',
-                          display: 'flex',
-                          color: 'white'
-                        }}>
-                          🔑
-                        </div>
-                        <h3 style={{
-                          margin: 0,
-                          fontSize: '1.125rem',
-                          fontWeight: '700',
-                          color: '#334155'
-                        }}>Anthropic API Key</h3>
-                      </div>
-
-                      <p style={{
-                        color: '#64748b',
-                        fontSize: '0.95rem',
-                        marginBottom: '1.5rem',
-                        lineHeight: '1.6'
-                      }}>
-                        To use the receipt upload feature, you need an Anthropic API key. 
-                        Get one from <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" style={{ color: '#667eea', textDecoration: 'none', fontWeight: '600' }}>console.anthropic.com</a>
-                      </p>
-
-                      {apiKey ? (
-                        <div style={{
-                          background: '#d1fae5',
-                          border: '2px solid #10b981',
-                          borderRadius: '12px',
-                          padding: '1rem',
-                          marginBottom: '1rem'
-                        }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            color: '#065f46',
-                            fontWeight: '600',
-                            marginBottom: '0.5rem'
-                          }}>
-                            ✓ API Key Connected
-                          </div>
-                          <div style={{
-                            color: '#047857',
-                            fontSize: '0.875rem',
-                            fontFamily: 'monospace',
-                            wordBreak: 'break-all'
-                          }}>
-                            {apiKey.substring(0, 20)}...{apiKey.substring(apiKey.length - 4)}
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{
-                          background: '#fef3c7',
-                          border: '2px solid #f59e0b',
-                          borderRadius: '12px',
-                          padding: '1rem',
-                          marginBottom: '1rem'
-                        }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            color: '#92400e',
-                            fontWeight: '600',
-                            fontSize: '0.95rem'
-                          }}>
-                            ⚠️ No API Key Set
-                          </div>
-                          <div style={{
-                            color: '#78350f',
-                            fontSize: '0.875rem',
-                            marginTop: '0.5rem'
-                          }}>
-                            Receipt upload is disabled until you add your API key below.
-                          </div>
-                        </div>
-                      )}
-
-                      <label style={{
-                        display: 'block',
-                        marginBottom: '0.75rem',
-                        fontWeight: '600',
-                        color: '#334155',
-                        fontSize: '0.95rem'
-                      }}>
-                        API Key
-                      </label>
-                      <input
-                        type="password"
-                        value={tempApiKey}
-                        onChange={(e) => setTempApiKey(e.target.value)}
-                        placeholder="sk-ant-api03-..."
-                        style={{
-                          width: '100%',
-                          padding: '0.875rem',
-                          borderRadius: '12px',
-                          border: '2px solid #e2e8f0',
-                          fontSize: '0.95rem',
-                          fontFamily: 'monospace',
-                          marginBottom: '1rem',
-                          boxSizing: 'border-box'
-                        }}
-                      />
-
-                      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                        <button
-                          onClick={saveApiKey}
-                          disabled={!tempApiKey}
-                          style={{
-                            background: tempApiKey ? 'linear-gradient(135deg, #667eea, #764ba2)' : '#e2e8f0',
-                            color: tempApiKey ? 'white' : '#94a3b8',
-                            border: 'none',
-                            padding: '0.875rem 1.75rem',
-                            borderRadius: '12px',
-                            cursor: tempApiKey ? 'pointer' : 'not-allowed',
-                            fontWeight: '600',
-                            fontSize: '0.95rem',
-                            boxShadow: tempApiKey ? '0 4px 12px rgba(102, 126, 234, 0.3)' : 'none',
-                            transition: 'all 0.3s ease'
-                          }}
-                        >
-                          💾 Save API Key
-                        </button>
-
-                        {apiKey && (
-                          <button
-                            onClick={clearApiKey}
-                            style={{
-                              background: 'white',
-                              color: '#ef4444',
-                              border: '2px solid #ef4444',
-                              padding: '0.875rem 1.75rem',
-                              borderRadius: '12px',
-                              cursor: 'pointer',
-                              fontWeight: '600',
-                              fontSize: '0.95rem',
-                              transition: 'all 0.3s ease'
-                            }}
-                          >
-                            🗑️ Remove Key
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Info Section */}
-                    <div style={{
-                      background: '#eff6ff',
-                      borderRadius: '16px',
-                      padding: '1.5rem',
-                      border: '1px solid #dbeafe'
-                    }}>
-                      <h4 style={{
-                        margin: '0 0 1rem 0',
-                        fontSize: '1rem',
-                        fontWeight: '700',
-                        color: '#1e40af',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem'
-                      }}>
-                        ℹ️ About API Keys
-                      </h4>
-                      <ul style={{
-                        margin: 0,
-                        paddingLeft: '1.25rem',
-                        color: '#1e40af',
-                        fontSize: '0.875rem',
-                        lineHeight: '1.8'
-                      }}>
-                        <li>Your API key is stored locally in your browser</li>
-                        <li>It's never sent anywhere except to Anthropic's API</li>
-                        <li>Each receipt costs approximately $0.01-0.03 to process</li>
-                        <li>You can get $5 in free credits when you sign up</li>
-                        <li>The app works offline except for receipt processing</li>
-                      </ul>
-                    </div>
-
-                    {/* Data Management Section */}
-                    <div style={{
-                      marginTop: '2rem',
-                      paddingTop: '2rem',
-                      borderTop: '2px solid #e2e8f0'
-                    }}>
-                      <h3 style={{
-                        margin: '0 0 1rem 0',
-                        fontSize: '1.125rem',
-                        fontWeight: '700',
-                        color: '#334155'
-                      }}>Data Management</h3>
-                      
-                      <div style={{
-                        background: '#fef2f2',
-                        borderRadius: '12px',
-                        padding: '1.5rem',
-                        border: '1px solid #fecaca'
-                      }}>
-                        <p style={{
-                          color: '#7f1d1d',
-                          fontSize: '0.875rem',
-                          margin: '0 0 1rem 0',
-                          lineHeight: '1.6'
-                        }}>
-                          <strong>Clear All Data:</strong> This will permanently delete all receipts, items, and your API key from this browser.
-                        </p>
-                        <button
-                          onClick={() => {
-                            if (confirm('Are you sure? This will delete ALL your data and cannot be undone!')) {
-                              localStorage.clear();
-                              window.location.reload();
-                            }
-                          }}
-                          style={{
-                            background: '#dc2626',
-                            color: 'white',
-                            border: 'none',
-                            padding: '0.75rem 1.5rem',
-                            borderRadius: '10px',
-                            cursor: 'pointer',
-                            fontWeight: '600',
-                            fontSize: '0.875rem'
-                          }}
-                        >
-                          🗑️ Clear All Data
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 )}
               </div>
@@ -1597,9 +937,9 @@ Categorize each item appropriately. If you can't read something clearly, make yo
           );
         };
 
-        // Render the app
+        // Render
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<GroceryExpenseTracker />);
+        root.render(<GroceryScanner />);
     </script>
 </body>
 </html>
