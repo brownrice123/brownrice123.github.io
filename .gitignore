@@ -8,3 +8,8 @@ test_grocery_data.csv
 
 # Generated SQLite sample database
 sample_data/sample.db
+
+# dbt generated artifacts
+brownrice.duckdb
+logs/
+target/
