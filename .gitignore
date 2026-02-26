@@ -1,0 +1,18 @@
+# Local sample spreadsheets / generated inputs
+GroceryTrackerData.xlsx
+GroceryListSample.xlsx
+
+# Generated profiling artifacts
+example_report.md
+test_grocery_data.csv
+
+# Generated SQLite sample database
+sample_data/sample.db
+
+# dbt generated artifacts
+brownrice.duckdb
+logs/
+target/
+
+# Monitoring outputs
+outputs/

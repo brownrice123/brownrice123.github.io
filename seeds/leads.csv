@@ -1,0 +1,5 @@
+lead_id,company_id,email,segment
+1001,1,owner@acme.com,SMB
+1002,2,sales@globex.com,Enterprise
+1003,3,contact@initech.com,Mid-Market
+1004,4,hello@umbrella.com,SMB
