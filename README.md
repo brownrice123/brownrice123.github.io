@@ -1,23 +1,24 @@
-# Minimal dbt Core Project (DuckDB)
+# SQL Checks as Code (SQLite)
 
-This repository includes a minimal dbt Core project using the DuckDB adapter and a local DuckDB database file.
+Minimal Python project for running data-quality checks against a SQLite database using SQL assertion queries generated from YAML rules.
 
-## Project layout
+## Project structure
 
-- `dbt_project.yml`: dbt project configuration.
-- `seeds/companies.csv`, `seeds/leads.csv`: source seed data.
-- `models/staging/stg_companies.sql`, `models/staging/stg_leads.sql`: staging models.
-- `models/marts/leads_by_segment.sql`: simple aggregate mart.
-- `models/staging/schema.yml`: model descriptions and tests.
+- `dq/runner.py`: CLI runner for checks.
+- `checks.yaml`: Example checks config.
+- `sample_data/make_sample_db.py`: Creates `sample_data/sample.db` with sample data (includes intentional failures).
+- `requirements.txt`: Python dependencies.
 
-## 1) Install dependencies
+## How to run
 
 ### Windows (PowerShell)
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install dbt-core dbt-duckdb
+pip install -r requirements.txt
+python sample_data/make_sample_db.py
+python -m dq.runner --db sample_data/sample.db --checks checks.yaml
 ```
 
 ### macOS (Terminal)
@@ -25,50 +26,16 @@ pip install dbt-core dbt-duckdb
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install dbt-core dbt-duckdb
+pip install -r requirements.txt
+python sample_data/make_sample_db.py
+python -m dq.runner --db sample_data/sample.db --checks checks.yaml
 ```
 
-## 2) Configure profile
+## Expected behavior
 
-Create `~/.dbt/profiles.yml` with:
-
-```yaml
-brownrice_dbt:
-  target: dev
-  outputs:
-    dev:
-      type: duckdb
-      path: brownrice.duckdb
-      threads: 1
-```
-
-## 3) Run dbt
-
-From this repo root:
-
-### Windows (PowerShell)
-
-```powershell
-dbt seed
-dbt build
-dbt docs generate
-# optional:
-# dbt docs serve
-```
-
-### macOS (Terminal)
-
-```bash
-dbt seed
-dbt build
-dbt docs generate
-# optional:
-# dbt docs serve
-```
-
-## Included tests
-
-In `models/staging/schema.yml`:
-
-- `stg_leads.lead_id`: `unique`, `not_null`
-- `stg_leads.company_id`: `not_null`, `relationships` to `stg_companies.company_id`
+- Each check prints one line in the format:
+  - `[PASS] <check name> - offending rows: 0`
+  - `[FAIL] <check name> - offending rows: <n>`
+- Exit code is:
+  - `0` when all checks pass
+  - `1` when any check fails
