@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sqlite3
 import sys
@@ -12,6 +13,7 @@ import yaml
 
 VALID_RULES = {"not_null", "unique", "accepted_values", "relationships"}
 IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+MAX_SAMPLE_ROWS = 5
 
 
 @dataclass
@@ -129,6 +131,65 @@ def build_assertion_query(check: Check) -> tuple[str, list[Any]]:
     raise ValueError(f"Unsupported rule: {check.rule}")
 
 
+def row_to_dicts(columns: list[str], rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def run_checks(db_path: Path, checks: list[Check]) -> int:
+    any_fail = False
+    results: list[dict[str, Any]] = []
+    passed_count = 0
+    failed_count = 0
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+
+        for check in checks:
+            query, params = build_assertion_query(check)
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            count = len(rows)
+            sample_rows = row_to_dicts(columns, rows[:MAX_SAMPLE_ROWS])
+
+            passed = count == 0
+            status = "PASS" if passed else "FAIL"
+            print(f"[{status}] {check.name} - offending rows: {count}")
+
+            if passed:
+                passed_count += 1
+            else:
+                failed_count += 1
+                any_fail = True
+                print(f"  Sample offending rows (up to {MAX_SAMPLE_ROWS}):")
+                for idx, row in enumerate(sample_rows, start=1):
+                    print(f"    {idx}. {row}")
+
+            results.append(
+                {
+                    "name": check.name,
+                    "table": check.table,
+                    "rule": check.rule,
+                    "status": status,
+                    "fail_count": count,
+                    "sample_rows": sample_rows,
+                }
+            )
+
+    summary = {
+        "total_checks": len(checks),
+        "passed": passed_count,
+        "failed": failed_count,
+    }
+    print(
+        "Summary: "
+        f"total={summary['total_checks']}, "
+        f"passed={summary['passed']}, "
+        f"failed={summary['failed']}"
+    )
+
+    payload = {"summary": summary, "results": results}
+    Path("dq_results.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 def run_checks(db_path: Path, checks: list[Check]) -> int:
     any_fail = False
     with sqlite3.connect(db_path) as conn:
