@@ -14,5 +14,9 @@ brownrice.duckdb
 logs/
 target/
 
-# Monitoring outputs
-outputs/
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

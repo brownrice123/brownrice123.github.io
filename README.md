@@ -1,18 +1,15 @@
-# Metric Anomaly Monitoring (SQL + Python)
+# SQL Checks as Code (SQLite)
 
-This project detects daily metric anomalies using a SQL-defined baseline and a Python runner.
+Minimal Python project for running data-quality checks against a SQLite database using SQL assertion queries generated from YAML rules.
 
-## What it does
+## Project structure
 
-- Reads `data/daily_metrics.csv`.
-- Computes a **7-day moving average baseline** using the **previous 7 days only**.
-- Computes deviation: `(metric_value - baseline) / baseline`.
-- Flags anomalies where `abs(deviation) >= 0.30` and baseline is available.
-- Writes:
-  - `outputs/flagged_days.csv`
-  - `outputs/anomaly_report.md`
+- `dq/runner.py`: CLI runner for checks.
+- `checks.yaml`: Example checks config.
+- `sample_data/make_sample_db.py`: Creates `sample_data/sample.db` with sample data (includes intentional failures).
+- `requirements.txt`: Python dependencies.
 
-## Setup
+## How to run
 
 ### Windows (PowerShell)
 
@@ -20,7 +17,8 @@ This project detects daily metric anomalies using a SQL-defined baseline and a P
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python src/run_monitoring.py
+python sample_data/make_sample_db.py
+python -m dq.runner --db sample_data/sample.db --checks checks.yaml
 ```
 
 ### macOS (Terminal)
@@ -29,11 +27,15 @@ python src/run_monitoring.py
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python src/run_monitoring.py
+python sample_data/make_sample_db.py
+python -m dq.runner --db sample_data/sample.db --checks checks.yaml
 ```
 
-## Files
+## Expected behavior
 
-- `sql/anomalies.sql` - anomaly logic in SQL (DuckDB reads CSV directly).
-- `src/run_monitoring.py` - executes SQL, writes flagged CSV + Markdown report.
-- `data/daily_metrics.csv` - sample input with intentional spikes/drops.
+- Each check prints one line in the format:
+  - `[PASS] <check name> - offending rows: 0`
+  - `[FAIL] <check name> - offending rows: <n>`
+- Exit code is:
+  - `0` when all checks pass
+  - `1` when any check fails

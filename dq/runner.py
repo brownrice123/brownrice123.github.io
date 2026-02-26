@@ -190,6 +190,18 @@ def run_checks(db_path: Path, checks: list[Check]) -> int:
 
     payload = {"summary": summary, "results": results}
     Path("dq_results.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+def run_checks(db_path: Path, checks: list[Check]) -> int:
+    any_fail = False
+    with sqlite3.connect(db_path) as conn:
+        for check in checks:
+            query, params = build_assertion_query(check)
+            rows = conn.execute(query, params).fetchall()
+            count = len(rows)
+            passed = count == 0
+            status = "PASS" if passed else "FAIL"
+            print(f"[{status}] {check.name} - offending rows: {count}")
+            if not passed:
+                any_fail = True
 
     return 1 if any_fail else 0
 
