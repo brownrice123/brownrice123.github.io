@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: stg_companies
+    description: "Staging model for company records loaded from the companies seed."
+    columns:
+      - name: company_id
+        description: "Primary key for each company."
+      - name: company_name
+        description: "Human-readable company name."
+      - name: segment
+        description: "Business segment classification for the company."
+
+  - name: stg_leads
+    description: "Staging model for lead records loaded from the leads seed."
+    columns:
+      - name: lead_id
+        description: "Unique identifier for each lead."
+        tests:
+          - unique
+          - not_null
+      - name: company_id
+        description: "Foreign key to stg_companies.company_id."
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_companies')
+                field: company_id
+      - name: email
+        description: "Contact email for the lead."
+      - name: segment
+        description: "Declared lead segment used for reporting."
+
+  - name: leads_by_segment
+    description: "Mart model aggregating lead counts by segment."
+    columns:
+      - name: segment
+        description: "Lead segment value."
+      - name: lead_count
+        description: "Number of leads in each segment."

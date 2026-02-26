@@ -1,0 +1,24 @@
+database: "sqlite"
+checks:
+  - name: "leads.lead_id must be unique"
+    table: "leads"
+    rule: "unique"
+    column: "lead_id"
+
+  - name: "leads.email must not be null"
+    table: "leads"
+    rule: "not_null"
+    column: "email"
+
+  - name: "leads.segment has accepted values"
+    table: "leads"
+    rule: "accepted_values"
+    column: "segment"
+    values: ["SMB", "Mid-Market", "Enterprise"]
+
+  - name: "leads.company_id references companies.company_id"
+    table: "leads"
+    rule: "relationships"
+    column: "company_id"
+    ref_table: "companies"
+    ref_column: "company_id"
